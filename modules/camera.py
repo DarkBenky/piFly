@@ -40,7 +40,7 @@ if __name__ == "__main__":
         stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         path = os.path.join(out_dir, f"pic_{stamp}.jpg")
         cam.take_picture(save_path=path)
-        print(f"Saved → {path}")
+        print(f"Saved -> {path}")
     finally:
         cam.stop()
         cam.close()
