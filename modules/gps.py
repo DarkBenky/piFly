@@ -1,6 +1,5 @@
-"""Minimal GPS reader — reads NMEA from serial, returns a dict."""
-
 import serial
+import time
 
 PORT = "/dev/ttyS0"
 BAUD = 115200
@@ -91,6 +90,7 @@ class GPS:
 
 if __name__ == "__main__":
     gps = GPS()
+    start = time.time()
     try:
         print("Reading GPS (Ctrl+C to stop)...")
         while True:
@@ -104,6 +104,7 @@ if __name__ == "__main__":
                       f"Lon={f'{lon:.5f}' if lon else 'N/A'}  "
                       f"Alt={f'{alt:.1f}m' if alt else 'N/A'}  "
                       f"Fix={fix}  Sats={d.get('sats', 0)}  "
+                      f"Time Since Start Of Program={time.time() - start:.1f}s"
                       f"{'\tLOCKED' if fix else '\tsearching...'}")
     except KeyboardInterrupt:
         print("Done.")
