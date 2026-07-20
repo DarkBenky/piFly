@@ -98,9 +98,13 @@ if __name__ == "__main__":
             if d:
                 lat = d.get("lat")
                 lon = d.get("lon")
+                alt = d.get("alt_m")
+                fix = d.get("fix", 0)
                 print(f"Lat={f'{lat:.5f}' if lat else 'N/A'}  "
                       f"Lon={f'{lon:.5f}' if lon else 'N/A'}  "
-                      f"Alt={d.get('alt_m')}m  Fix={d.get('fix')}  Sats={d.get('sats')}")
+                      f"Alt={f'{alt:.1f}m' if alt else 'N/A'}  "
+                      f"Fix={fix}  Sats={d.get('sats', 0)}  "
+                      f"{'\tLOCKED' if fix else '\tsearching...'}")
     except KeyboardInterrupt:
         print("Done.")
     finally:
