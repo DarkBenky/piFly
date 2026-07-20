@@ -96,7 +96,10 @@ if __name__ == "__main__":
         while True:
             d = gps.read()
             if d:
-                print(f"Lat={d.get('lat'):.5f}  Lon={d.get('lon'):.5f}  "
+                lat = d.get("lat")
+                lon = d.get("lon")
+                print(f"Lat={f'{lat:.5f}' if lat else 'N/A'}  "
+                      f"Lon={f'{lon:.5f}' if lon else 'N/A'}  "
                       f"Alt={d.get('alt_m')}m  Fix={d.get('fix')}  Sats={d.get('sats')}")
     except KeyboardInterrupt:
         print("Done.")
