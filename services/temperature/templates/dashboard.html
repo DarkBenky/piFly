@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>piFly — Temperature</title>
+  <script src="https://cdn.plot.ly/plotly-3.0.1.min.js"></script>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; margin: 20px; background: #0f0f0f; color: #ddd; }
+    h1 { margin-bottom: 4px; }
+    nav { margin: 10px 0 20px; }
+    nav a { color: #6cf; margin-right: 12px; text-decoration: none; font-weight: 500; }
+    nav a:hover { text-decoration: underline; }
+    nav a.active { color: #fff; }
+    #chart { width: 100%; height: 420px; }
+    .custom { margin: 12px 0 20px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    .custom input { padding: 4px 8px; background: #222; color: #ddd; border: 1px solid #444; border-radius: 4px; }
+    .custom button { padding: 4px 14px; background: #2a6; color: #fff; border: none; border-radius: 4px; cursor: pointer; }
+    .custom button:hover { background: #3b8; }
+  </style>
+</head>
+<body>
+  <h1>&#127777; piFly Temperature</h1>
+  <nav>
+    <a href="/?hours=6" {% if hours == 6 %}class="active"{% endif %}>6h</a>
+    <a href="/?hours=24" {% if hours == 24 %}class="active"{% endif %}>24h</a>
+    <a href="/?hours=168" {% if hours == 168 %}class="active"{% endif %}>7d</a>
+    <a href="/?hours=720" {% if hours == 720 %}class="active"{% endif %}>30d</a>
+  </nav>
+  <div class="custom">
+    <label>From: <input type="datetime-local" id="start"></label>
+    <label>To: <input type="datetime-local" id="end"></label>
+    <button onclick="customRange()">Show</button>
+    <button onclick="location.href='/?hours=24'" style="background:#555;">Reset</button>
+  </div>
+  <div id="chart"></div>
+
+  <script>
+    var graph = {{ graph_json | safe }};
+    var config = { responsive: true, displayModeBar: false };
+    Plotly.newPlot("chart", graph.data, graph.layout, config);
+
+    function customRange() {
+      var s = new Date(document.getElementById("start").value).getTime() / 1000;
+      var e = new Date(document.getElementById("end").value).getTime() / 1000;
+      if (s && e) { location.href = "/?start=" + s + "&end=" + e; }
+    }
+  </script>
+</body>
+</html>
