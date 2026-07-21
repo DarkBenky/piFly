@@ -10,6 +10,7 @@ SERVER_HOST = "91.98.145.193"
 SERVER_PORT = 5444
 
 if __name__ == "__main__":
+    print(f"Connecting to {SERVER_HOST}:{SERVER_PORT}")
     sensor = BME280()
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.connect((SERVER_HOST, SERVER_PORT))
