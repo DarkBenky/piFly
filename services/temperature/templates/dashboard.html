@@ -78,8 +78,12 @@
 
   <div class="charts">
     <div class="card">
-      <div class="card-label">Temperature &mdash; BME280 &amp; CPU</div>
-      <div class="chart" id="chart-temp"></div>
+      <div class="card-label">BME280 Temperature</div>
+      <div class="chart" id="chart-bme"></div>
+    </div>
+    <div class="card">
+      <div class="card-label">CPU Temperature</div>
+      <div class="chart" id="chart-cpu"></div>
     </div>
     <div class="card">
       <div class="card-label">Humidity</div>
@@ -96,7 +100,8 @@
   <script>
     var cfg = { responsive: true, displayModeBar: false };
 
-    Plotly.newPlot("chart-temp", {{ graph_temp | safe }}.data, {{ graph_temp | safe }}.layout, cfg);
+    Plotly.newPlot("chart-bme",  {{ graph_bme | safe }}.data,  {{ graph_bme | safe }}.layout,  cfg);
+    Plotly.newPlot("chart-cpu",  {{ graph_cpu | safe }}.data,  {{ graph_cpu | safe }}.layout,  cfg);
     Plotly.newPlot("chart-hum",  {{ graph_hum | safe }}.data,  {{ graph_hum | safe }}.layout,  cfg);
     Plotly.newPlot("chart-pres", {{ graph_pres | safe }}.data, {{ graph_pres | safe }}.layout, cfg);
 

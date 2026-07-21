@@ -92,6 +92,15 @@ def _query(hours=None, start=None, end=None):
     ]
 
 
+def _tight_range(values, pad=0.15):
+    lo, hi = min(values), max(values)
+    if lo == hi:
+        return [lo - 1, hi + 1]
+    span = hi - lo
+    extra = max(span * pad, 0.5)
+    return [lo - extra, hi + extra]
+
+
 def _make_figures(data):
     times = [datetime.fromtimestamp(r["timestamp"], tz=timezone.utc) for r in data]
     layout_base = dict(
@@ -107,41 +116,54 @@ def _make_figures(data):
         dragmode=False,
     )
 
-    fig_temp = go.Figure(layout=layout_base)
-    fig_temp.add_trace(go.Scatter(
-        x=times, y=[r["bme_temp_c"] for r in data],
-        mode="lines", name="BME280", line=dict(color="#4da6ff", width=1.8),
+    bme_vals = [r["bme_temp_c"] for r in data]
+    cpu_vals = [r["cpu_temp_c"] for r in data]
+    hum_vals = [r["bme_humidity_pct"] for r in data]
+    pres_vals = [r["bme_pressure_hpa"] for r in data]
+
+    fig_bme = go.Figure(layout=layout_base)
+    fig_bme.add_trace(go.Scatter(
+        x=times, y=bme_vals,
+        mode="lines", line=dict(color="#4da6ff", width=1.8),
     ))
-    fig_temp.add_trace(go.Scatter(
-        x=times, y=[r["cpu_temp_c"] for r in data],
-        mode="lines", name="CPU", line=dict(color="#ff6666", width=1.4),
+    fig_bme.update_layout(
+        yaxis=dict(title="°C", gridcolor="#2a2a2a", zeroline=False,
+                   range=_tight_range(bme_vals)),
+    )
+
+    fig_cpu = go.Figure(layout=layout_base)
+    fig_cpu.add_trace(go.Scatter(
+        x=times, y=cpu_vals,
+        mode="lines", line=dict(color="#ff6666", width=1.8),
     ))
-    fig_temp.update_layout(
-        yaxis=dict(title="°C", gridcolor="#2a2a2a", zeroline=False),
-        showlegend=False,
+    fig_cpu.update_layout(
+        yaxis=dict(title="°C", gridcolor="#2a2a2a", zeroline=False,
+                   range=_tight_range(cpu_vals)),
     )
 
     fig_hum = go.Figure(layout=layout_base)
     fig_hum.add_trace(go.Scatter(
-        x=times, y=[r["bme_humidity_pct"] for r in data],
-        mode="lines", name="Humidity", line=dict(color="#66cc66", width=1.8),
+        x=times, y=hum_vals,
+        mode="lines", line=dict(color="#66cc66", width=1.8),
         fill="tozeroy", fillcolor="rgba(102,204,102,0.08)",
     ))
     fig_hum.update_layout(
-        yaxis=dict(title="%", gridcolor="#2a2a2a", range=[0, 100], zeroline=False),
+        yaxis=dict(title="%", gridcolor="#2a2a2a", zeroline=False,
+                   range=_tight_range(hum_vals)),
     )
 
     fig_pres = go.Figure(layout=layout_base)
     fig_pres.add_trace(go.Scatter(
-        x=times, y=[r["bme_pressure_hpa"] for r in data],
-        mode="lines", name="Pressure", line=dict(color="#ffaa33", width=1.8),
+        x=times, y=pres_vals,
+        mode="lines", line=dict(color="#ffaa33", width=1.8),
         fill="tozeroy", fillcolor="rgba(255,170,51,0.08)",
     ))
     fig_pres.update_layout(
-        yaxis=dict(title="hPa", gridcolor="#2a2a2a", zeroline=False),
+        yaxis=dict(title="hPa", gridcolor="#2a2a2a", zeroline=False,
+                   range=_tight_range(pres_vals)),
     )
 
-    return fig_temp, fig_hum, fig_pres
+    return fig_bme, fig_cpu, fig_hum, fig_pres
 
 
 @app.route("/api/temperature")
@@ -168,11 +190,12 @@ def dashboard():
         hours = 24
         data = _query(hours=24)
 
-    fig_temp, fig_hum, fig_pres = _make_figures(data)
+    fig_bme, fig_cpu, fig_hum, fig_pres = _make_figures(data)
 
     return render_template(
         "dashboard.html",
-        graph_temp=fig_temp.to_json(),
+        graph_bme=fig_bme.to_json(),
+        graph_cpu=fig_cpu.to_json(),
         graph_hum=fig_hum.to_json(),
         graph_pres=fig_pres.to_json(),
         hours=hours,
