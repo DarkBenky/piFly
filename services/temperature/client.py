@@ -18,4 +18,5 @@ if __name__ == "__main__":
             s.sendall(f"{rec['timestamp']},{rec['bme_temp_c']},"
                       f"{rec['bme_pressure_hpa']},{rec['bme_humidity_pct']},"
                       f"{rec['cpu_temp_c']}\n".encode())
+            print(f"Sent -> {rec}")
             time.sleep(15)
