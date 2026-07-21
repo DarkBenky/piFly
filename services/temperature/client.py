@@ -6,7 +6,7 @@ from modules.temperature import BME280
 import socket
 import time
 
-SERVER_HOST = "127.0.0.1"
+SERVER_HOST = "91.98.145.193"
 SERVER_PORT = 5444
 
 if __name__ == "__main__":
