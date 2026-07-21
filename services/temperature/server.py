@@ -36,7 +36,7 @@ def migrateOldLogFiles(path: str):
 
 if __name__ == "__main__":
     initDB()
-    migrateOldLogFiles("temperature.log")
+    migrateOldLogFiles("../../logs/temperature.log")
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.bind((HOST, PORT))
         s.listen()
