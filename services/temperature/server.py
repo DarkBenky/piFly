@@ -19,7 +19,7 @@ def addRecord(rec):
     conn.close()
     print(f"Added -> {rec}")
 
-def migrateOldLogFiles(path: str)
+def migrateOldLogFiles(path: str):
     print(f"Migrating -> {path}")
     with open(path, "r") as f:
         for line in f:
