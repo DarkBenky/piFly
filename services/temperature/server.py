@@ -92,38 +92,56 @@ def _query(hours=None, start=None, end=None):
     ]
 
 
-def _make_figure(data):
+def _make_figures(data):
     times = [datetime.fromtimestamp(r["timestamp"], tz=timezone.utc) for r in data]
-
-    fig = go.Figure()
-
-    fig.add_trace(go.Scatter(
-        x=times, y=[r["bme_temp_c"] for r in data],
-        mode="lines", name="BME280 °C", line=dict(color="#4da6ff", width=1.5),
-    ))
-    fig.add_trace(go.Scatter(
-        x=times, y=[r["cpu_temp_c"] for r in data],
-        mode="lines", name="CPU °C", line=dict(color="#ff6666", width=1.5),
-    ))
-    fig.add_trace(go.Scatter(
-        x=times, y=[r["bme_humidity_pct"] for r in data],
-        mode="lines", name="Humidity %", line=dict(color="#66cc66", width=1, dash="dot"),
-        yaxis="y2",
-    ))
-
-    fig.update_layout(
+    layout_base = dict(
         template="plotly_dark",
-        paper_bgcolor="#0f0f0f",
-        plot_bgcolor="#0f0f0f",
-        margin=dict(l=40, r=40, t=30, b=30),
-        legend=dict(orientation="h", yanchor="top", y=1.12, xanchor="left", x=0),
+        paper_bgcolor="#1a1a1a",
+        plot_bgcolor="#1a1a1a",
+        margin=dict(l=20, r=20, t=10, b=10),
         hovermode="x unified",
-        yaxis=dict(title="Temperature (°C)", gridcolor="#222"),
-        yaxis2=dict(title="Humidity (%)", overlaying="y", side="right", gridcolor="#222", range=[0, 100]),
-        xaxis=dict(gridcolor="#222"),
+        xaxis=dict(gridcolor="#2a2a2a", showgrid=False),
+        yaxis=dict(gridcolor="#2a2a2a"),
+        height=200,
+        showlegend=False,
+        dragmode=False,
     )
 
-    return fig
+    fig_temp = go.Figure(layout=layout_base)
+    fig_temp.add_trace(go.Scatter(
+        x=times, y=[r["bme_temp_c"] for r in data],
+        mode="lines", name="BME280", line=dict(color="#4da6ff", width=1.8),
+    ))
+    fig_temp.add_trace(go.Scatter(
+        x=times, y=[r["cpu_temp_c"] for r in data],
+        mode="lines", name="CPU", line=dict(color="#ff6666", width=1.4),
+    ))
+    fig_temp.update_layout(
+        yaxis=dict(title="°C", gridcolor="#2a2a2a", zeroline=False),
+        showlegend=False,
+    )
+
+    fig_hum = go.Figure(layout=layout_base)
+    fig_hum.add_trace(go.Scatter(
+        x=times, y=[r["bme_humidity_pct"] for r in data],
+        mode="lines", name="Humidity", line=dict(color="#66cc66", width=1.8),
+        fill="tozeroy", fillcolor="rgba(102,204,102,0.08)",
+    ))
+    fig_hum.update_layout(
+        yaxis=dict(title="%", gridcolor="#2a2a2a", range=[0, 100], zeroline=False),
+    )
+
+    fig_pres = go.Figure(layout=layout_base)
+    fig_pres.add_trace(go.Scatter(
+        x=times, y=[r["bme_pressure_hpa"] for r in data],
+        mode="lines", name="Pressure", line=dict(color="#ffaa33", width=1.8),
+        fill="tozeroy", fillcolor="rgba(255,170,51,0.08)",
+    ))
+    fig_pres.update_layout(
+        yaxis=dict(title="hPa", gridcolor="#2a2a2a", zeroline=False),
+    )
+
+    return fig_temp, fig_hum, fig_pres
 
 
 @app.route("/api/temperature")
@@ -150,12 +168,13 @@ def dashboard():
         hours = 24
         data = _query(hours=24)
 
-    fig = _make_figure(data)
-    graph_json = fig.to_json()
+    fig_temp, fig_hum, fig_pres = _make_figures(data)
 
     return render_template(
         "dashboard.html",
-        graph_json=graph_json,
+        graph_temp=fig_temp.to_json(),
+        graph_hum=fig_hum.to_json(),
+        graph_pres=fig_pres.to_json(),
         hours=hours,
     )
 

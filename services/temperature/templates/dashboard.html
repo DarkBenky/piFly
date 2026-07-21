@@ -4,39 +4,101 @@
   <title>piFly — Temperature</title>
   <script src="https://cdn.plot.ly/plotly-3.0.1.min.js"></script>
   <style>
-    body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; margin: 20px; background: #0f0f0f; color: #ddd; }
-    h1 { margin-bottom: 4px; }
-    nav { margin: 10px 0 20px; }
-    nav a { color: #6cf; margin-right: 12px; text-decoration: none; font-weight: 500; }
-    nav a:hover { text-decoration: underline; }
-    nav a.active { color: #fff; }
-    #chart { width: 100%; height: 420px; }
-    .custom { margin: 12px 0 20px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-    .custom input { padding: 4px 8px; background: #222; color: #ddd; border: 1px solid #444; border-radius: 4px; }
-    .custom button { padding: 4px 14px; background: #2a6; color: #fff; border: none; border-radius: 4px; cursor: pointer; }
-    .custom button:hover { background: #3b8; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #111; color: #ccc; padding: 10px 16px 30px;
+    }
+    .topbar {
+      display: flex; align-items: baseline; justify-content: space-between;
+      flex-wrap: wrap; gap: 6px; margin-bottom: 4px;
+    }
+    .topbar h1 { font-size: 1.3rem; font-weight: 600; color: #eee; }
+    .topbar .sub { font-size: 0.8rem; color: #777; }
+    nav {
+      display: flex; gap: 2px; margin: 8px 0 6px;
+      background: #1a1a1a; border-radius: 8px; padding: 3px; width: fit-content;
+    }
+    nav a {
+      color: #999; text-decoration: none; font-size: 0.82rem;
+      padding: 5px 14px; border-radius: 6px; transition: 0.15s;
+    }
+    nav a:hover { color: #ddd; background: #2a2a2a; }
+    nav a.active { color: #fff; background: #333; }
+    .controls {
+      display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
+      margin: 10px 0 16px;
+    }
+    .controls input {
+      padding: 5px 10px; background: #1a1a1a; color: #ccc;
+      border: 1px solid #333; border-radius: 6px; font-size: 0.82rem;
+    }
+    .controls button {
+      padding: 5px 14px; border: none; border-radius: 6px;
+      font-size: 0.82rem; cursor: pointer; font-weight: 500; transition: 0.15s;
+    }
+    .btn-go { background: #2a6; color: #fff; }
+    .btn-go:hover { background: #3b8; }
+    .btn-reset { background: #444; color: #ccc; }
+    .btn-reset:hover { background: #555; }
+    .charts {
+      display: flex; flex-direction: column; gap: 12px;
+    }
+    .card {
+      background: #1a1a1a; border: 1px solid #2a2a2a;
+      border-radius: 10px; padding: 10px 14px 6px;
+    }
+    .card-label {
+      font-size: 0.75rem; font-weight: 600; text-transform: uppercase;
+      letter-spacing: 0.5px; color: #777; margin-bottom: 2px;
+    }
+    .card .chart { width: 100%; height: 220px; }
+    footer { text-align: center; font-size: 0.7rem; color: #444; margin-top: 20px; }
   </style>
 </head>
 <body>
-  <h1>&#127777; piFly Temperature</h1>
+  <div class="topbar">
+    <h1>&#127777; piFly</h1>
+    <span class="sub">temperature &middot; humidity &middot; pressure</span>
+  </div>
+
   <nav>
-    <a href="/?hours=6" {% if hours == 6 %}class="active"{% endif %}>6h</a>
+    <a href="/?hours=6"  {% if hours == 6 %}class="active"{% endif %}>6h</a>
     <a href="/?hours=24" {% if hours == 24 %}class="active"{% endif %}>24h</a>
     <a href="/?hours=168" {% if hours == 168 %}class="active"{% endif %}>7d</a>
     <a href="/?hours=720" {% if hours == 720 %}class="active"{% endif %}>30d</a>
   </nav>
-  <div class="custom">
-    <label>From: <input type="datetime-local" id="start"></label>
-    <label>To: <input type="datetime-local" id="end"></label>
-    <button onclick="customRange()">Show</button>
-    <button onclick="location.href='/?hours=24'" style="background:#555;">Reset</button>
+
+  <div class="controls">
+    <input type="datetime-local" id="start" placeholder="From">
+    <input type="datetime-local" id="end" placeholder="To">
+    <button class="btn-go" onclick="customRange()">Apply</button>
+    <button class="btn-reset" onclick="location.href='/?hours=24'">Reset 24h</button>
   </div>
-  <div id="chart"></div>
+
+  <div class="charts">
+    <div class="card">
+      <div class="card-label">Temperature &mdash; BME280 &amp; CPU</div>
+      <div class="chart" id="chart-temp"></div>
+    </div>
+    <div class="card">
+      <div class="card-label">Humidity</div>
+      <div class="chart" id="chart-hum"></div>
+    </div>
+    <div class="card">
+      <div class="card-label">Pressure</div>
+      <div class="chart" id="chart-pres"></div>
+    </div>
+  </div>
+
+  <footer>piFly &copy; 2026</footer>
 
   <script>
-    var graph = {{ graph_json | safe }};
-    var config = { responsive: true, displayModeBar: false };
-    Plotly.newPlot("chart", graph.data, graph.layout, config);
+    var cfg = { responsive: true, displayModeBar: false };
+
+    Plotly.newPlot("chart-temp", {{ graph_temp | safe }}.data, {{ graph_temp | safe }}.layout, cfg);
+    Plotly.newPlot("chart-hum",  {{ graph_hum | safe }}.data,  {{ graph_hum | safe }}.layout,  cfg);
+    Plotly.newPlot("chart-pres", {{ graph_pres | safe }}.data, {{ graph_pres | safe }}.layout, cfg);
 
     function customRange() {
       var s = new Date(document.getElementById("start").value).getTime() / 1000;
