@@ -10,6 +10,7 @@ SERVER_HOST = "91.98.145.193"
 SERVER_PORT = 5444
 SAMPLES = 8
 PERIOD_S = 15
+SMOOTHING = 0.4  # blend 40% new value, 60% previous value
 
 def significantChange(a, b, threshold):
     return abs(a - b) > threshold
@@ -20,6 +21,7 @@ if __name__ == "__main__":
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.connect((SERVER_HOST, SERVER_PORT))
         prev_temp = None
+        prev_rec = None
         while True:
             records = []
             for _ in range(SAMPLES):
@@ -40,9 +42,18 @@ if __name__ == "__main__":
                 "bme_humidity_pct": sum([r["bme_humidity_pct"] for r in records]) / len(records),
                 "cpu_temp_c": sum([r["cpu_temp_c"] for r in records]) / len(records),
             }
+
+            # blend with previous value for extra smoothness
+            if prev_rec is not None:
+                alpha = SMOOTHING
+                rec["bme_temp_c"] = alpha * rec["bme_temp_c"] + (1 - alpha) * prev_rec["bme_temp_c"]
+                rec["bme_pressure_hpa"] = alpha * rec["bme_pressure_hpa"] + (1 - alpha) * prev_rec["bme_pressure_hpa"]
+                rec["bme_humidity_pct"] = alpha * rec["bme_humidity_pct"] + (1 - alpha) * prev_rec["bme_humidity_pct"]
+                rec["cpu_temp_c"] = alpha * rec["cpu_temp_c"] + (1 - alpha) * prev_rec["cpu_temp_c"]
             
             s.sendall(f"{rec['timestamp']},{rec['bme_temp_c']},"
                       f"{rec['bme_pressure_hpa']},{rec['bme_humidity_pct']},"
                       f"{rec['cpu_temp_c']}\n".encode())
             print(f"Sent -> {rec}")
             prev_temp = rec["bme_temp_c"]
+            prev_rec = rec
