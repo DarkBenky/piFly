@@ -8,6 +8,8 @@ import time
 
 SERVER_HOST = "91.98.145.193"
 SERVER_PORT = 5444
+SAMPLES = 8
+PERIOD_S = 15
 
 def significantChange(a, b, threshold):
     return abs(a - b) > threshold
@@ -19,20 +21,28 @@ if __name__ == "__main__":
         s.connect((SERVER_HOST, SERVER_PORT))
         prev_temp = None
         while True:
-            rec = sensor.get_record()
-            if prev_temp is not None and significantChange(prev_temp, rec["bme_temp_c"], 0.75):
-                print(f"Spike? {prev_temp:.1f} → {rec['bme_temp_c']:.1f}°C — re-reading...")
-                time.sleep(3)
-                rec2 = sensor.get_record()
-                if significantChange(prev_temp, rec2["bme_temp_c"], 0.75):
-                    print(f"  Confirmed real change: {rec2['bme_temp_c']:.1f}°C")
-                    rec = rec2
-                else:
-                    print(f"  Noise — discarded, using {rec2['bme_temp_c']:.1f}°C")
-                    rec = rec2
+            records = []
+            for _ in range(SAMPLES):
+                rec = sensor.get_record()
+                if  prev_temp is not None and significantChange(rec["bme_temp_c"], prev_temp, 0.25):
+                    print(f"Temp changed from {prev_temp} to {rec['bme_temp_c']} -> skipping")
+                    continue
+                records.append(rec)
+                time.sleep(PERIOD_S / SAMPLES)
+
+            if not records:
+                continue
+
+            rec = {
+                "timestamp": records[0]["timestamp"],
+                "bme_temp_c": sum([r["bme_temp_c"] for r in records]) / len(records),
+                "bme_pressure_hpa": sum([r["bme_pressure_hpa"] for r in records]) / len(records),
+                "bme_humidity_pct": sum([r["bme_humidity_pct"] for r in records]) / len(records),
+                "cpu_temp_c": sum([r["cpu_temp_c"] for r in records]) / len(records),
+            }
+            
             s.sendall(f"{rec['timestamp']},{rec['bme_temp_c']},"
                       f"{rec['bme_pressure_hpa']},{rec['bme_humidity_pct']},"
                       f"{rec['cpu_temp_c']}\n".encode())
             print(f"Sent -> {rec}")
             prev_temp = rec["bme_temp_c"]
-            time.sleep(15)
