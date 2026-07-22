@@ -196,6 +196,17 @@ def _tight_range(values, pad=0.15):
     return [lo - extra, hi + extra]
 
 
+def _moving_average(values, window=3):
+    """Simple centred moving average — trims `window//2` points from each end."""
+    if len(values) < window:
+        return values
+    half = window // 2
+    smoothed = []
+    for i in range(half, len(values) - half):
+        smoothed.append(sum(values[i - half:i + half + 1]) / window)
+    return smoothed
+
+
 def _make_scatter(x, y, color, width=1.8, dash=None, fill=None, fillcolor=None):
     trace = go.Scatter(
         x=x, y=y, mode="lines",
@@ -206,6 +217,7 @@ def _make_scatter(x, y, color, width=1.8, dash=None, fill=None, fillcolor=None):
         trace.fillcolor = fillcolor
     return trace
 
+SMOOTHING_WINDOW = 5
 
 def _make_figures(data, compare_yesterday=None, compare_week=None, weather=None, unit="c"):
     weather_hourly = weather["hourly"] if weather else None
@@ -215,6 +227,14 @@ def _make_figures(data, compare_yesterday=None, compare_week=None, weather=None,
     cpu_vals = [_convert_temp(r["cpu_temp_c"], unit) for r in data]
     hum_vals = [r["bme_humidity_pct"] for r in data]
     pres_vals = [r["bme_pressure_hpa"] for r in data]
+
+    # smooth the main traces — trim x to match
+    half = SMOOTHING_WINDOW // 2
+    bme_smooth = _moving_average(bme_vals, SMOOTHING_WINDOW) if len(bme_vals) >= SMOOTHING_WINDOW else bme_vals
+    cpu_smooth = _moving_average(cpu_vals, SMOOTHING_WINDOW) if len(cpu_vals) >= SMOOTHING_WINDOW else cpu_vals
+    hum_smooth = _moving_average(hum_vals, SMOOTHING_WINDOW) if len(hum_vals) >= SMOOTHING_WINDOW else hum_vals
+    pres_smooth = _moving_average(pres_vals, SMOOTHING_WINDOW) if len(pres_vals) >= SMOOTHING_WINDOW else pres_vals
+    times_smooth = times[half:len(times)-half] if len(times) >= SMOOTHING_WINDOW else times
 
     temp_unit = "°F" if unit == "f" else "°C"
 
@@ -242,7 +262,7 @@ def _make_figures(data, compare_yesterday=None, compare_week=None, weather=None,
             fig.add_trace(_make_scatter(ct, cv, color, width=1.0, dash="dot"))
 
     fig_bme = go.Figure(layout=layout_base)
-    fig_bme.add_trace(_make_scatter(times, bme_vals, "#4da6ff"))
+    fig_bme.add_trace(_make_scatter(times_smooth, bme_smooth, "#4da6ff"))
     _add_compare(fig_bme, "bme_temp_c", 24, "#4da6ff")
     all_bme = list(bme_vals)
     if compare_yesterday:
@@ -257,7 +277,7 @@ def _make_figures(data, compare_yesterday=None, compare_week=None, weather=None,
     fig_bme.update_layout(yaxis=dict(title=temp_unit, gridcolor="#2a2a2a", zeroline=False, range=_tight_range(all_bme)))
 
     fig_cpu = go.Figure(layout=layout_base)
-    fig_cpu.add_trace(_make_scatter(times, cpu_vals, "#ff6666"))
+    fig_cpu.add_trace(_make_scatter(times_smooth, cpu_smooth, "#ff6666"))
     _add_compare(fig_cpu, "cpu_temp_c", 24, "#ff6666")
     all_cpu = list(cpu_vals)
     if compare_yesterday:
@@ -267,7 +287,7 @@ def _make_figures(data, compare_yesterday=None, compare_week=None, weather=None,
     fig_cpu.update_layout(yaxis=dict(title=temp_unit, gridcolor="#2a2a2a", zeroline=False, range=_tight_range(all_cpu)))
 
     fig_hum = go.Figure(layout=layout_base)
-    fig_hum.add_trace(_make_scatter(times, hum_vals, "#66cc66", fill="tozeroy", fillcolor="rgba(102,204,102,0.08)"))
+    fig_hum.add_trace(_make_scatter(times_smooth, hum_smooth, "#66cc66", fill="tozeroy", fillcolor="rgba(102,204,102,0.08)"))
     _add_compare(fig_hum, "bme_humidity_pct", 24, "#66cc66")
     all_hum = list(hum_vals)
     if compare_yesterday:
@@ -282,7 +302,7 @@ def _make_figures(data, compare_yesterday=None, compare_week=None, weather=None,
     fig_hum.update_layout(yaxis=dict(title="%", gridcolor="#2a2a2a", zeroline=False, range=_tight_range(all_hum)))
 
     fig_pres = go.Figure(layout=layout_base)
-    fig_pres.add_trace(_make_scatter(times, pres_vals, "#ffaa33", fill="tozeroy", fillcolor="rgba(255,170,51,0.08)"))
+    fig_pres.add_trace(_make_scatter(times_smooth, pres_smooth, "#ffaa33", fill="tozeroy", fillcolor="rgba(255,170,51,0.08)"))
     _add_compare(fig_pres, "bme_pressure_hpa", 24, "#ffaa33")
     all_pres = list(pres_vals)
     if compare_yesterday:
