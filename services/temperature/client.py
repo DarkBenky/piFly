@@ -9,15 +9,30 @@ import time
 SERVER_HOST = "91.98.145.193"
 SERVER_PORT = 5444
 
+def significantChange(a, b, threshold):
+    return abs(a - b) > threshold
+
 if __name__ == "__main__":
     print(f"Connecting to {SERVER_HOST}:{SERVER_PORT}")
     sensor = BME280()
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.connect((SERVER_HOST, SERVER_PORT))
+        prev_temp = None
         while True:
             rec = sensor.get_record()
+            if prev_temp is not None and significantChange(prev_temp, rec["bme_temp_c"], 0.75):
+                print(f"Spike? {prev_temp:.1f} → {rec['bme_temp_c']:.1f}°C — re-reading...")
+                time.sleep(3)
+                rec2 = sensor.get_record()
+                if significantChange(prev_temp, rec2["bme_temp_c"], 0.75):
+                    print(f"  Confirmed real change: {rec2['bme_temp_c']:.1f}°C")
+                    rec = rec2
+                else:
+                    print(f"  Noise — discarded, using {rec2['bme_temp_c']:.1f}°C")
+                    rec = rec2
             s.sendall(f"{rec['timestamp']},{rec['bme_temp_c']},"
                       f"{rec['bme_pressure_hpa']},{rec['bme_humidity_pct']},"
                       f"{rec['cpu_temp_c']}\n".encode())
             print(f"Sent -> {rec}")
+            prev_temp = rec["bme_temp_c"]
             time.sleep(15)
