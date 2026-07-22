@@ -211,6 +211,7 @@ def _make_scatter(x, y, color, width=1.8, dash=None, fill=None, fillcolor=None):
     trace = go.Scatter(
         x=x, y=y, mode="lines",
         line=dict(color=color, width=width, dash=dash, shape="spline"),
+        connectgaps=True,
     )
     if fill:
         trace.fill = fill
@@ -255,10 +256,16 @@ def _make_figures(data, compare_yesterday=None, compare_week=None, weather=None,
         if compare_yesterday:
             ct = [datetime.fromtimestamp(r["timestamp"] + shift_h * 3600, tz=timezone.utc) for r in compare_yesterday]
             cv = [_convert_temp(r[key], unit) if key in ("bme_temp_c", "cpu_temp_c") else r[key] for r in compare_yesterday]
+            if len(cv) >= SMOOTHING_WINDOW:
+                cv = _moving_average(cv, SMOOTHING_WINDOW)
+                ct = ct[SMOOTHING_WINDOW // 2:len(ct) - SMOOTHING_WINDOW // 2]
             fig.add_trace(_make_scatter(ct, cv, color, width=1.2, dash="dash"))
         if compare_week:
             ct = [datetime.fromtimestamp(r["timestamp"] + shift_h * 3600, tz=timezone.utc) for r in compare_week]
             cv = [_convert_temp(r[key], unit) if key in ("bme_temp_c", "cpu_temp_c") else r[key] for r in compare_week]
+            if len(cv) >= SMOOTHING_WINDOW:
+                cv = _moving_average(cv, SMOOTHING_WINDOW)
+                ct = ct[SMOOTHING_WINDOW // 2:len(ct) - SMOOTHING_WINDOW // 2]
             fig.add_trace(_make_scatter(ct, cv, color, width=1.0, dash="dot"))
 
     fig_bme = go.Figure(layout=layout_base)
