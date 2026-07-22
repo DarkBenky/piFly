@@ -9,78 +9,194 @@
   <script src="https://cdn.plot.ly/plotly-3.0.1.min.js"></script>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #111;
+      --panel: #1a1a1a;
+      --panel-hover: #232323;
+      --border: #2a2a2a;
+      --border-hover: #3a3a3a;
+      --text: #ccc;
+      --text-bright: #eee;
+      --text-dim: #888;
+      --text-faint: #555;
+      --text-ghost: #3a3a3a;
+      --accent: #6cf;
+
+      --radius: 8px;
+      --radius-sm: 6px;
+      --ctrl-h: 34px;
+      --gap: 8px;
+
+      --c-bme: #6cf;
+      --c-cpu: #e8a33d;
+      --c-hum: #5fd6a8;
+      --c-pres: #b98ee8;
+    }
+
     body {
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-      background: #111; color: #ccc; padding: 8px 12px 24px;
+      background: var(--bg); color: var(--text);
+      padding: 10px 12px 28px;
     }
-    a { color: #6cf; text-decoration: none; }
+    a { color: var(--accent); text-decoration: none; }
 
+    :focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+      border-radius: var(--radius-sm);
+    }
+
+    /* ---------- banner ---------- */
     .banner {
-      display: flex; gap: 10px; flex-wrap: wrap; align-items: center;
-      background: #1a1a1a; border: 1px solid #2a2a2a;
-      border-radius: 10px; padding: 8px 14px; margin-bottom: 10px;
-      font-size: 0.85rem;
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      background: var(--panel); border: 1px solid var(--border);
+      border-radius: 10px; padding: 10px 14px; margin-bottom: 12px;
     }
-    .banner .item { display: flex; flex-direction: column; min-width: 70px; }
-    .banner .item .val { font-size: 1.15rem; font-weight: 600; color: #eee; }
-    .banner .item .lbl { font-size: 0.65rem; text-transform: uppercase; color: #666; letter-spacing: 0.5px; }
-    .banner .spacer { flex: 1; }
-    .banner .age { font-size: 0.7rem; color: #555; }
+    .banner .item {
+      display: flex; flex-direction: column; gap: 2px;
+      padding: 2px 12px;
+      border-left: 1px solid var(--border);
+    }
+    .banner .item:first-child { border-left: none; padding-left: 0; }
+    .banner .item .val { font-size: 1.2rem; font-weight: 600; color: var(--text-bright); line-height: 1.2; }
+    .banner .item .lbl { font-size: 0.65rem; text-transform: uppercase; color: var(--text-faint); letter-spacing: 0.6px; }
+    .banner .age {
+      grid-column: 1 / -1;
+      text-align: right; font-size: 0.68rem; color: var(--text-ghost);
+      margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border);
+    }
+    .banner .empty { grid-column: 1 / -1; color: var(--text-faint); font-size: 0.85rem; padding: 4px 0; }
 
+    /* ---------- topbar ---------- */
     .topbar {
       display: flex; align-items: baseline; justify-content: space-between;
-      flex-wrap: wrap; gap: 6px; margin-bottom: 6px;
+      flex-wrap: wrap; gap: 6px; margin-bottom: 8px;
     }
-    .topbar h1 { font-size: 1.2rem; font-weight: 600; color: #eee; }
+    .topbar h1 { font-size: 1.2rem; font-weight: 600; color: var(--text-bright); letter-spacing: 0.2px; }
 
+    /* ---------- toolbar ---------- */
     .toolbar {
-      display: flex; flex-wrap: wrap; gap: 6px; align-items: center;
-      margin: 8px 0 6px;
+      display: flex; flex-wrap: wrap; gap: var(--gap); align-items: center;
+      margin: 8px 0 10px;
     }
-    .toolbar nav {
-      display: flex; gap: 2px;
-      background: #1a1a1a; border-radius: 8px; padding: 3px;
+
+    /* every direct control shares the same height, radius and border */
+    .toolbar nav,
+    .toolbar .toggle,
+    .toolbar select,
+    .toolbar button,
+    .toolbar label.check,
+    .toolbar .range-group {
+      height: var(--ctrl-h);
+      box-sizing: border-box;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
     }
+
+    .toolbar nav { display: flex; gap: 2px; padding: 3px; }
     .toolbar nav a {
-      color: #999; text-decoration: none; font-size: 0.78rem;
-      padding: 4px 12px; border-radius: 6px; transition: 0.15s; white-space: nowrap;
+      height: 100%; display: inline-flex; align-items: center;
+      color: var(--text-dim); text-decoration: none; font-size: 0.8rem;
+      padding: 0 12px; border-radius: var(--radius-sm); transition: background 0.15s, color 0.15s;
+      white-space: nowrap;
     }
-    .toolbar nav a:hover { color: #ddd; background: #2a2a2a; }
+    .toolbar nav a:hover { color: #ddd; background: var(--panel-hover); }
     .toolbar nav a.active { color: #fff; background: #333; }
 
-    .toolbar select, .toolbar button, .toolbar input {
-      padding: 4px 10px; background: #1a1a1a; color: #ccc;
-      border: 1px solid #333; border-radius: 6px; font-size: 0.78rem; cursor: pointer;
+    .toolbar select,
+    .toolbar button {
+      padding: 0 14px; color: var(--text); font-size: 0.8rem; font-family: inherit;
+      cursor: pointer; transition: background 0.15s, border-color 0.15s;
     }
-    .toolbar button:hover { background: #2a2a2a; }
-    .toolbar .toggle { display: flex; gap: 2px; background: #1a1a1a; border-radius: 6px; padding: 2px; }
+    .toolbar select:hover,
+    .toolbar button:hover { background: var(--panel-hover); border-color: var(--border-hover); }
+
+    .toolbar .toggle { display: flex; gap: 2px; padding: 3px; }
     .toolbar .toggle button {
-      border: none; padding: 3px 10px; border-radius: 5px; background: transparent;
+      height: 100%; border: none; padding: 0 12px; border-radius: var(--radius-sm);
+      background: transparent; color: var(--text-dim); font-size: 0.8rem;
     }
     .toolbar .toggle button.on { background: #333; color: #fff; }
-    .toolbar label { font-size: 0.78rem; color: #888; display: flex; align-items: center; gap: 4px; cursor: pointer; }
 
+    .toolbar label.check {
+      display: inline-flex; align-items: center; gap: 6px; padding: 0 12px;
+      font-size: 0.8rem; color: var(--text-dim); cursor: pointer; user-select: none;
+    }
+    .toolbar label.check input { accent-color: var(--accent); cursor: pointer; }
+
+    /* custom range: grouped into one pill so the two inputs + apply read as one control */
+    .toolbar .range-group {
+      display: flex; align-items: center; gap: 0; padding: 0 4px 0 12px;
+      overflow: hidden;
+    }
+    .toolbar .range-group .sep { color: var(--text-ghost); font-size: 0.75rem; padding: 0 6px; }
+    .toolbar .range-group input[type="datetime-local"] {
+      height: calc(var(--ctrl-h) - 8px);
+      background: transparent; color: var(--text); border: none;
+      font-size: 0.76rem; font-family: inherit; padding: 0 2px; width: 148px;
+    }
+    .toolbar .range-group button {
+      height: calc(var(--ctrl-h) - 8px); margin-left: 8px;
+      border: none; border-left: 1px solid var(--border); border-radius: 0;
+      padding: 0 14px; background: transparent; color: var(--accent); font-size: 0.8rem;
+    }
+    .toolbar .range-group button:hover { background: var(--panel-hover); }
+
+    .toolbar .csv-btn { display: inline-flex; align-items: center; gap: 6px; }
+
+    .toolbar .flex-spacer { flex: 1 1 auto; }
+
+    /* ---------- charts ---------- */
     .charts { display: flex; flex-direction: column; gap: 10px; }
     .card {
-      background: #1a1a1a; border: 1px solid #2a2a2a;
-      border-radius: 10px; padding: 8px 12px 4px;
+      background: var(--panel); border: 1px solid var(--border);
+      border-top: 2px solid var(--card-accent, var(--border));
+      border-radius: 10px; padding: 10px 12px 4px;
     }
+    .card.bme  { --card-accent: var(--c-bme); }
+    .card.cpu  { --card-accent: var(--c-cpu); }
+    .card.hum  { --card-accent: var(--c-hum); }
+    .card.pres { --card-accent: var(--c-pres); }
+
     .card-label {
+      display: flex; align-items: center; gap: 6px;
       font-size: 0.7rem; font-weight: 600; text-transform: uppercase;
-      letter-spacing: 0.5px; color: #666; margin-bottom: 2px;
+      letter-spacing: 0.6px; color: var(--text-faint); margin-bottom: 2px;
+    }
+    .card-label::before {
+      content: ""; width: 7px; height: 7px; border-radius: 50%;
+      background: var(--card-accent, var(--text-faint));
+      flex: 0 0 auto;
     }
     .card .chart { width: 100%; height: 210px; }
 
+    /* ---------- refresh bar ---------- */
     .refresh-bar {
-      display: flex; align-items: center; gap: 8px; margin-top: 14px;
-      font-size: 0.7rem; color: #444;
+      display: flex; align-items: center; gap: 10px; margin-top: 16px;
+      font-size: 0.7rem; color: var(--text-ghost);
     }
     .refresh-bar .bar {
-      flex: 1; height: 3px; background: #222; border-radius: 2px; overflow: hidden;
+      flex: 1; height: 3px; background: var(--border); border-radius: 2px; overflow: hidden;
     }
-    .refresh-bar .bar .fill { height: 100%; background: #444; transition: width 1s linear; }
+    .refresh-bar .bar .fill { height: 100%; background: var(--accent); opacity: 0.55; transition: width 1s linear; }
+    .refresh-bar #refresh-count { min-width: 30px; text-align: right; }
 
-    footer { text-align: center; font-size: 0.65rem; color: #333; margin-top: 12px; }
+    footer { text-align: center; font-size: 0.65rem; color: var(--text-ghost); margin-top: 14px; }
+
+    /* ---------- small screens ---------- */
+    @media (max-width: 520px) {
+      .banner { grid-template-columns: repeat(2, 1fr); row-gap: 10px; }
+      .banner .item:nth-child(3) { border-left: none; }
+      .toolbar { gap: 6px; }
+      .toolbar nav { flex: 1 1 100%; justify-content: space-between; }
+      .toolbar nav a { flex: 1; justify-content: center; }
+      .toolbar .range-group { flex: 1 1 100%; }
+      .toolbar .range-group input[type="datetime-local"] { flex: 1; width: auto; }
+      .toolbar select, .toolbar .toggle, .toolbar label.check, .toolbar .csv-btn { flex: 1 1 auto; }
+    }
   </style>
 </head>
 <body>
@@ -92,9 +208,8 @@
   <div class="item"><span class="val">{{ "%.1f"|format(latest.bme_humidity_pct) }}%</span><span class="lbl">Humidity</span></div>
   <div class="item"><span class="val">{{ "%.1f"|format(latest.bme_pressure_hpa) }} hPa</span><span class="lbl">Pressure</span></div>
   {% else %}
-  <div class="item"><span class="val">—</span><span class="lbl">No data yet</span></div>
+  <div class="empty">No data yet</div>
   {% endif %}
-  <div class="spacer"></div>
   <div class="age" id="banner-age"></div>
 </div>
 
@@ -115,34 +230,40 @@
     <button class="{% if unit == 'f' %}on{% endif %}" data-unit="f">°F</button>
   </div>
 
-  <select id="compare-sel" onchange="setCompare(this.value)">
+  <select id="compare-sel" onchange="setCompare(this.value)" aria-label="Compare against">
     <option value="" {% if not compare %}selected{% endif %}>Current only</option>
     <option value="yesterday" {% if compare == 'yesterday' %}selected{% endif %}>vs Yesterday</option>
     <option value="week" {% if compare == 'week' %}selected{% endif %}>vs Last Week</option>
   </select>
 
-  <label><input type="checkbox" id="weather-cb" onchange="setWeather(this.checked)" {% if weather == '1' %}checked{% endif %}>Weather</label>
+  <label class="check"><input type="checkbox" id="weather-cb" onchange="setWeather(this.checked)" {% if weather == '1' %}checked{% endif %}>Weather</label>
 
-  <input type="datetime-local" id="start" style="width:160px">
-  <input type="datetime-local" id="end" style="width:160px">
-  <button onclick="customRange()">Apply</button>
-  <button onclick="downloadCSV()">&#8615; CSV</button>
+  <div class="flex-spacer"></div>
+
+  <div class="range-group">
+    <input type="datetime-local" id="start" aria-label="Range start">
+    <span class="sep">&rarr;</span>
+    <input type="datetime-local" id="end" aria-label="Range end">
+    <button onclick="customRange()">Apply</button>
+  </div>
+
+  <button class="csv-btn" onclick="downloadCSV()">&#8615; CSV</button>
 </div>
 
 <div class="charts">
-  <div class="card">
+  <div class="card bme">
     <div class="card-label">BME280 Temperature</div>
     <div class="chart" id="chart-bme"></div>
   </div>
-  <div class="card">
+  <div class="card cpu">
     <div class="card-label">CPU Temperature</div>
     <div class="chart" id="chart-cpu"></div>
   </div>
-  <div class="card">
+  <div class="card hum">
     <div class="card-label">Humidity</div>
     <div class="chart" id="chart-hum"></div>
   </div>
-  <div class="card">
+  <div class="card pres">
     <div class="card-label">Pressure</div>
     <div class="chart" id="chart-pres"></div>
   </div>
@@ -187,7 +308,6 @@ setInterval(function() {
         '<div class="item"><span class="val">' + cpu.toFixed(1) + '°' + (u==="f"?"F":"C") + '</span><span class="lbl">CPU</span></div>' +
         '<div class="item"><span class="val">' + d.bme_humidity_pct.toFixed(1) + '%</span><span class="lbl">Humidity</span></div>' +
         '<div class="item"><span class="val">' + d.bme_pressure_hpa.toFixed(1) + ' hPa</span><span class="lbl">Pressure</span></div>' +
-        '<div class="spacer"></div>' +
         '<div class="age">updated just now</div>';
       document.getElementById("banner").innerHTML = html;
     });
