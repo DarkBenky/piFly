@@ -229,6 +229,8 @@ def _make_figures(data, compare_yesterday=None, compare_week=None, weather=None,
         height=200,
         showlegend=False,
         dragmode=False,
+        # smooth all lines with spline interpolation
+        line_shape="spline",
     )
 
     def _add_compare(fig, key, shift_h, color):
