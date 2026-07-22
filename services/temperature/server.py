@@ -108,6 +108,21 @@ def _query(hours=None, start=None, end=None):
     ]
 
 
+_WMO_CODES = {
+    0: ("☀️", "Clear"), 1: ("🌤️", "Mostly clear"), 2: ("⛅", "Partly cloudy"), 3: ("☁️", "Overcast"),
+    45: ("🌫️", "Fog"), 48: ("🌫️", "Rime fog"),
+    51: ("🌦️", "Light drizzle"), 53: ("🌦️", "Drizzle"), 55: ("🌦️", "Heavy drizzle"),
+    61: ("🌧️", "Light rain"), 63: ("🌧️", "Rain"), 65: ("🌧️", "Heavy rain"),
+    71: ("❄️", "Light snow"), 73: ("❄️", "Snow"), 75: ("❄️", "Heavy snow"),
+    80: ("🌦️", "Rain showers"), 81: ("🌦️", "Moderate showers"), 82: ("🌦️", "Violent showers"),
+    95: ("⛈️", "Thunderstorm"), 96: ("⛈️", "T-storm + hail"), 99: ("⛈️", "Severe T-storm"),
+}
+
+
+def _weather_code(code):
+    return _WMO_CODES.get(code, ("🌡️", "Unknown"))
+
+
 def _fetch_weather():
     global _weather_cache, _weather_cache_time
     now = datetime.now(timezone.utc)
@@ -117,27 +132,59 @@ def _fetch_weather():
     url = (
         f"https://api.open-meteo.com/v1/forecast"
         f"?latitude={WEATHER_LAT}&longitude={WEATHER_LON}"
+        f"&current=temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,wind_speed_10m"
         f"&hourly=temperature_2m,relative_humidity_2m,pressure_msl"
-        f"&timezone=UTC&forecast_days=2"
+        f"&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,wind_speed_10m_max"
+        f"&timezone=auto&forecast_days=3"
     )
     try:
         with urllib.request.urlopen(url, timeout=5) as resp:
             raw = json.loads(resp.read())
-        hourly = raw["hourly"]
-        data = []
-        for i, t in enumerate(hourly["time"]):
-            data.append({
+
+        hourly_data = []
+        h = raw["hourly"]
+        for i, t in enumerate(h["time"]):
+            hourly_data.append({
                 "timestamp": datetime.fromisoformat(t).replace(tzinfo=timezone.utc).timestamp(),
-                "temp_c": hourly["temperature_2m"][i],
-                "humidity_pct": hourly["relative_humidity_2m"][i],
-                "pressure_hpa": hourly["pressure_msl"][i],
+                "temp_c": h["temperature_2m"][i],
+                "humidity_pct": h["relative_humidity_2m"][i],
+                "pressure_hpa": h["pressure_msl"][i],
             })
-        _weather_cache = data
+
+        daily_data = []
+        d = raw["daily"]
+        for i, dt in enumerate(d["time"]):
+            code = d["weather_code"][i]
+            emoji, desc = _weather_code(code)
+            daily_data.append({
+                "date": dt,
+                "emoji": emoji,
+                "desc": desc,
+                "temp_max": d["temperature_2m_max"][i],
+                "temp_min": d["temperature_2m_min"][i],
+                "rain_pct": d["precipitation_probability_max"][i],
+                "wind_max": d["wind_speed_10m_max"][i],
+            })
+
+        cur = raw["current"]
+        code = cur["weather_code"]
+        emoji, desc = _weather_code(code)
+        current_data = {
+            "temp_c": cur["temperature_2m"],
+            "humidity_pct": cur["relative_humidity_2m"],
+            "apparent_temp_c": cur["apparent_temperature"],
+            "wind_kmh": cur["wind_speed_10m"],
+            "emoji": emoji,
+            "desc": desc,
+        }
+
+        result = {"hourly": hourly_data, "daily": daily_data, "current": current_data}
+        _weather_cache = result
         _weather_cache_time = now
-        return data
+        return result
     except Exception as e:
         print(f"Weather fetch failed: {e}")
-        return _weather_cache or []
+        return _weather_cache or {"hourly": [], "daily": [], "current": None}
 
 
 def _tight_range(values, pad=0.15):
@@ -161,6 +208,7 @@ def _make_scatter(x, y, color, width=1.8, dash=None, fill=None, fillcolor=None):
 
 
 def _make_figures(data, compare_yesterday=None, compare_week=None, weather=None, unit="c"):
+    weather_hourly = weather["hourly"] if weather else None
     times = [datetime.fromtimestamp(r["timestamp"], tz=timezone.utc) for r in data]
 
     bme_vals = [_convert_temp(r["bme_temp_c"], unit) for r in data]
@@ -201,9 +249,9 @@ def _make_figures(data, compare_yesterday=None, compare_week=None, weather=None,
         all_bme += [_convert_temp(r["bme_temp_c"], unit) for r in compare_yesterday]
     if compare_week:
         all_bme += [_convert_temp(r["bme_temp_c"], unit) for r in compare_week]
-    if weather:
-        wt = [datetime.fromtimestamp(w["timestamp"], tz=timezone.utc) for w in weather]
-        wv = [_convert_temp(w["temp_c"], unit) for w in weather]
+    if weather_hourly:
+        wt = [datetime.fromtimestamp(w["timestamp"], tz=timezone.utc) for w in weather_hourly]
+        wv = [_convert_temp(w["temp_c"], unit) for w in weather_hourly]
         fig_bme.add_trace(_make_scatter(wt, wv, "#88ccff", width=1.0, dash="dot"))
         all_bme += wv
     fig_bme.update_layout(yaxis=dict(title=temp_unit, gridcolor="#2a2a2a", zeroline=False, range=_tight_range(all_bme)))
@@ -226,9 +274,9 @@ def _make_figures(data, compare_yesterday=None, compare_week=None, weather=None,
         all_hum += [r["bme_humidity_pct"] for r in compare_yesterday]
     if compare_week:
         all_hum += [r["bme_humidity_pct"] for r in compare_week]
-    if weather:
-        wt = [datetime.fromtimestamp(w["timestamp"], tz=timezone.utc) for w in weather]
-        wv = [w["humidity_pct"] for w in weather]
+    if weather_hourly:
+        wt = [datetime.fromtimestamp(w["timestamp"], tz=timezone.utc) for w in weather_hourly]
+        wv = [w["humidity_pct"] for w in weather_hourly]
         fig_hum.add_trace(_make_scatter(wt, wv, "#aaddaa", width=1.0, dash="dot"))
         all_hum += wv
     fig_hum.update_layout(yaxis=dict(title="%", gridcolor="#2a2a2a", zeroline=False, range=_tight_range(all_hum)))
@@ -241,9 +289,9 @@ def _make_figures(data, compare_yesterday=None, compare_week=None, weather=None,
         all_pres += [r["bme_pressure_hpa"] for r in compare_yesterday]
     if compare_week:
         all_pres += [r["bme_pressure_hpa"] for r in compare_week]
-    if weather:
-        wt = [datetime.fromtimestamp(w["timestamp"], tz=timezone.utc) for w in weather]
-        wv = [w["pressure_hpa"] for w in weather]
+    if weather_hourly:
+        wt = [datetime.fromtimestamp(w["timestamp"], tz=timezone.utc) for w in weather_hourly]
+        wv = [w["pressure_hpa"] for w in weather_hourly]
         fig_pres.add_trace(_make_scatter(wt, wv, "#ffcc88", width=1.0, dash="dot"))
         all_pres += wv
     fig_pres.update_layout(yaxis=dict(title="hPa", gridcolor="#2a2a2a", zeroline=False, range=_tight_range(all_pres)))
@@ -337,7 +385,8 @@ def dashboard():
                 end=(datetime.now(timezone.utc) - timedelta(hours=168)).timestamp(),
             )
 
-    weather = _fetch_weather() if show_weather == "1" else None
+    weather_data = _fetch_weather()
+    weather = weather_data if show_weather == "1" else None
 
     fig_bme, fig_cpu, fig_hum, fig_pres = _make_figures(
         data,
@@ -359,6 +408,7 @@ def dashboard():
         compare=compare,
         weather=show_weather,
         latest=latest,
+        weather_data=weather_data,
     )
 
 

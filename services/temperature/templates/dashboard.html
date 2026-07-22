@@ -149,6 +149,49 @@
 
     .toolbar .flex-spacer { flex: 1 1 auto; }
 
+    .weather-card {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      background: var(--panel); border: 1px solid var(--border);
+      border-radius: 10px; padding: 12px 14px; margin-bottom: 12px;
+    }
+    .weather-current {
+      grid-column: 1 / -1;
+      display: flex; align-items: center; gap: 14px;
+      padding-bottom: 10px; border-bottom: 1px solid var(--border);
+    }
+    .weather-current .w-icon { font-size: 2.2rem; line-height: 1; }
+    .weather-current .w-main { display: flex; flex-direction: column; gap: 2px; }
+    .weather-current .w-temp { font-size: 1.6rem; font-weight: 700; color: var(--text-bright); }
+    .weather-current .w-desc { font-size: 0.8rem; color: var(--text-dim); }
+    .weather-current .w-details {
+      display: flex; gap: 16px; margin-left: auto; flex-wrap: wrap;
+    }
+    .weather-current .w-detail {
+      display: flex; flex-direction: column; align-items: center; gap: 1px;
+    }
+    .weather-current .w-detail .w-val { font-size: 0.9rem; font-weight: 600; color: var(--text-bright); }
+    .weather-current .w-detail .w-lbl { font-size: 0.6rem; text-transform: uppercase; color: var(--text-faint); letter-spacing: 0.4px; }
+    .weather-day {
+      display: flex; flex-direction: column; gap: 4px;
+      padding: 6px 10px; border-radius: var(--radius-sm);
+      background: rgba(255,255,255,0.03);
+    }
+    .weather-day .w-day-label { font-size: 0.7rem; font-weight: 600; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.4px; }
+    .weather-day .w-day-row { display: flex; align-items: center; gap: 8px; }
+    .weather-day .w-day-icon { font-size: 1.3rem; }
+    .weather-day .w-day-temps { font-size: 0.85rem; color: var(--text-bright); }
+    .weather-day .w-day-temps .lo { color: var(--text-dim); }
+    .weather-day .w-rain { font-size: 0.75rem; color: #6cf; margin-left: auto; }
+    .weather-day .w-wind { font-size: 0.7rem; color: var(--text-faint); }
+
+    @media (max-width: 520px) {
+      .weather-card { grid-template-columns: 1fr; }
+      .weather-current { flex-wrap: wrap; }
+      .weather-current .w-details { margin-left: 0; width: 100%; justify-content: space-around; margin-top: 6px; }
+    }
+
     /* ---------- charts ---------- */
     .charts { display: flex; flex-direction: column; gap: 10px; }
     .card {
@@ -249,6 +292,34 @@
 
   <button class="csv-btn" onclick="downloadCSV()">&#8615; CSV</button>
 </div>
+
+{% if weather_data and weather_data.current %}
+<div class="weather-card">
+  {% set wc = weather_data.current %}
+  <div class="weather-current">
+    <span class="w-icon">{{ wc.emoji }}</span>
+    <div class="w-main">
+      <span class="w-temp">{{ "%.1f"|format(wc.temp_c) }}°C</span>
+      <span class="w-desc">{{ wc.desc }}{% if wc.apparent_temp_c %} &middot; feels like {{ "%.1f"|format(wc.apparent_temp_c) }}°C{% endif %}</span>
+    </div>
+    <div class="w-details">
+      <div class="w-detail"><span class="w-val">{{ wc.humidity_pct }}%</span><span class="w-lbl">Humidity</span></div>
+      <div class="w-detail"><span class="w-val">{{ "%.1f"|format(wc.wind_kmh) }} km/h</span><span class="w-lbl">Wind</span></div>
+    </div>
+  </div>
+  {% for wd in weather_data.daily[:2] %}
+  <div class="weather-day">
+    <span class="w-day-label">{{ "Today" if loop.index == 1 else "Tomorrow" }}</span>
+    <div class="w-day-row">
+      <span class="w-day-icon">{{ wd.emoji }}</span>
+      <span class="w-day-temps"><strong>{{ "%.0f"|format(wd.temp_max) }}°</strong> <span class="lo">{{ "%.0f"|format(wd.temp_min) }}°</span></span>
+      <span class="w-rain">{% if wd.rain_pct %}&#9748; {{ wd.rain_pct }}%{% endif %}</span>
+      <span class="w-wind">{{ "%.0f"|format(wd.wind_max) }} km/h</span>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
 
 <div class="charts">
   <div class="card bme">
