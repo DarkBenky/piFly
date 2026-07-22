@@ -199,7 +199,7 @@ def _tight_range(values, pad=0.15):
 def _make_scatter(x, y, color, width=1.8, dash=None, fill=None, fillcolor=None):
     trace = go.Scatter(
         x=x, y=y, mode="lines",
-        line=dict(color=color, width=width, dash=dash),
+        line=dict(color=color, width=width, dash=dash, shape="spline"),
     )
     if fill:
         trace.fill = fill
@@ -229,8 +229,6 @@ def _make_figures(data, compare_yesterday=None, compare_week=None, weather=None,
         height=200,
         showlegend=False,
         dragmode=False,
-        # smooth all lines with spline interpolation
-        line_shape="spline",
     )
 
     def _add_compare(fig, key, shift_h, color):
