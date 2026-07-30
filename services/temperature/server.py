@@ -2,7 +2,6 @@ import json
 import os
 import socket
 import sqlite3
-import threading
 import urllib.request
 from datetime import datetime, timedelta, timezone
 
@@ -10,7 +9,6 @@ from flask import Flask, request, jsonify, render_template
 import plotly.graph_objects as go
 
 HOST = "0.0.0.0"
-PORT = 5444
 FLASK_PORT = 5000
 WEATHER_LAT = 48.208803
 WEATHER_LON = 17.146854
@@ -46,6 +44,9 @@ def initDB():
         "(timestamp REAL UNIQUE, bme_temp_c REAL, bme_pressure_hpa REAL, "
         "bme_humidity_pct REAL, cpu_temp_c REAL)"
     )
+    c.execute(
+        "CREATE INDEX IF NOT EXISTS idx_temp_ts ON temperature(timestamp)"
+    )
     conn.commit()
     conn.close()
 
@@ -78,22 +79,55 @@ def migrateOldLogFiles(path: str):
             addRecord(rec)
 
 
-def _query(hours=None, start=None, end=None):
+def _query(hours=None, start=None, end=None, downsample=True):
     conn = sqlite3.connect("temperature.db")
     c = conn.cursor()
-    if start is not None and end is not None:
-        c.execute(
-            "SELECT * FROM temperature WHERE timestamp >= ? AND timestamp <= ? ORDER BY timestamp",
-            (start, end),
-        )
-    elif hours is not None:
-        cutoff = (datetime.now(timezone.utc) - timedelta(hours=hours)).timestamp()
-        c.execute(
-            "SELECT * FROM temperature WHERE timestamp >= ? ORDER BY timestamp",
-            (cutoff,),
-        )
+
+    # auto-downsample long ranges (>7 days) to hourly averages
+    use_agg = downsample and (
+        (start is not None and end is not None and (end - start) > 604800) or
+        (hours is not None and hours > 168)
+    )
+
+    if use_agg:
+        if start is not None and end is not None:
+            c.execute(
+                "SELECT CAST(timestamp/3600 AS INTEGER)*3600 AS ts, "
+                "AVG(bme_temp_c), AVG(bme_pressure_hpa), AVG(bme_humidity_pct), AVG(cpu_temp_c) "
+                "FROM temperature WHERE timestamp >= ? AND timestamp <= ? "
+                "GROUP BY ts ORDER BY ts",
+                (start, end),
+            )
+        elif hours is not None:
+            cutoff = (datetime.now(timezone.utc) - timedelta(hours=hours)).timestamp()
+            c.execute(
+                "SELECT CAST(timestamp/3600 AS INTEGER)*3600 AS ts, "
+                "AVG(bme_temp_c), AVG(bme_pressure_hpa), AVG(bme_humidity_pct), AVG(cpu_temp_c) "
+                "FROM temperature WHERE timestamp >= ? "
+                "GROUP BY ts ORDER BY ts",
+                (cutoff,),
+            )
+        else:
+            c.execute(
+                "SELECT CAST(timestamp/3600 AS INTEGER)*3600 AS ts, "
+                "AVG(bme_temp_c), AVG(bme_pressure_hpa), AVG(bme_humidity_pct), AVG(cpu_temp_c) "
+                "FROM temperature GROUP BY ts ORDER BY ts"
+            )
     else:
-        c.execute("SELECT * FROM temperature ORDER BY timestamp")
+        if start is not None and end is not None:
+            c.execute(
+                "SELECT * FROM temperature WHERE timestamp >= ? AND timestamp <= ? ORDER BY timestamp",
+                (start, end),
+            )
+        elif hours is not None:
+            cutoff = (datetime.now(timezone.utc) - timedelta(hours=hours)).timestamp()
+            c.execute(
+                "SELECT * FROM temperature WHERE timestamp >= ? ORDER BY timestamp",
+                (cutoff,),
+            )
+        else:
+            c.execute("SELECT * FROM temperature ORDER BY timestamp")
+
     rows = c.fetchall()
     conn.close()
     return [
@@ -373,6 +407,19 @@ def api_temperature_csv():
     )
 
 
+@app.route("/api/ingest", methods=["POST"])
+def api_ingest():
+    data = request.get_json()
+    if not data:
+        return jsonify({"error": "invalid JSON"}), 400
+    required = ["timestamp", "bme_temp_c", "bme_pressure_hpa", "bme_humidity_pct", "cpu_temp_c"]
+    for key in required:
+        if key not in data:
+            return jsonify({"error": f"missing field: {key}"}), 400
+    addRecord(data)
+    return jsonify({"status": "ok"}), 200
+
+
 @app.route("/")
 def dashboard():
     hours = request.args.get("hours", type=float)
@@ -439,35 +486,8 @@ def dashboard():
     )
 
 
-def _run_tcp_listener():
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.bind((HOST, PORT))
-        s.listen()
-        while True:
-            conn, addr = s.accept()
-            print(f"TCP connected by {addr}")
-            with conn:
-                while True:
-                    data = conn.recv(1024)
-                    if not data:
-                        break
-                    parts = data.decode().strip().split(",")
-                    rec = {
-                        "timestamp": float(parts[0]),
-                        "bme_temp_c": float(parts[1]),
-                        "bme_pressure_hpa": float(parts[2]),
-                        "bme_humidity_pct": float(parts[3]),
-                        "cpu_temp_c": float(parts[4]),
-                    }
-                    print(f"Received -> {rec}")
-                    addRecord(rec)
-
-
 if __name__ == "__main__":
     initDB()
-    t = threading.Thread(target=_run_tcp_listener, daemon=True)
-    t.start()
     ip = _lan_ip()
-    print(f"TCP  listening on {ip}:{PORT}")
     print(f"Web  listening on {ip}:{FLASK_PORT}")
     app.run(host="0.0.0.0", port=FLASK_PORT, debug=False)

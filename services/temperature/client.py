@@ -3,77 +3,54 @@ import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from modules.temperature import BME280
-import socket
+import requests
 import time
 
-SERVER_HOST = "91.98.145.193"
-SERVER_PORT = 5444
+SERVER_URL = "http://91.98.145.193:5000/api/ingest"
 SAMPLES = 8
 PERIOD_S = 15
 SMOOTHING = 0.4  # blend 40% new value, 60% previous value
 
-def significantChange(a, b, threshold):
-    return abs(a - b) > threshold
-
-
-def _connect():
-    """Create and connect a socket with TCP keepalive enabled."""
-    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    s.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
-    s.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPIDLE, 60)
-    s.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPINTVL, 10)
-    s.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPCNT, 3)
-    s.connect((SERVER_HOST, SERVER_PORT))
-    return s
-
 
 if __name__ == "__main__":
-    print(f"Connecting to {SERVER_HOST}:{SERVER_PORT}")
+    print(f"Target server: {SERVER_URL}")
     sensor = BME280()
-    prev_temp = None
     prev_rec = None
 
     while True:
+        records = []
+        for _ in range(SAMPLES):
+            rec = sensor.get_record()
+            records.append(rec)
+            time.sleep(PERIOD_S / SAMPLES)
+
+        if not records:
+            continue
+
+        rec = {
+            "timestamp": records[0]["timestamp"],
+            "bme_temp_c": sum(r["bme_temp_c"] for r in records) / len(records),
+            "bme_pressure_hpa": sum(r["bme_pressure_hpa"] for r in records) / len(records),
+            "bme_humidity_pct": sum(r["bme_humidity_pct"] for r in records) / len(records),
+            "cpu_temp_c": sum(r["cpu_temp_c"] for r in records) / len(records),
+        }
+
+        # blend with previous value for extra smoothness
+        if prev_rec is not None:
+            alpha = SMOOTHING
+            rec["bme_temp_c"] = alpha * rec["bme_temp_c"] + (1 - alpha) * prev_rec["bme_temp_c"]
+            rec["bme_pressure_hpa"] = alpha * rec["bme_pressure_hpa"] + (1 - alpha) * prev_rec["bme_pressure_hpa"]
+            rec["bme_humidity_pct"] = alpha * rec["bme_humidity_pct"] + (1 - alpha) * prev_rec["bme_humidity_pct"]
+            rec["cpu_temp_c"] = alpha * rec["cpu_temp_c"] + (1 - alpha) * prev_rec["cpu_temp_c"]
+
         try:
-            with _connect() as s:
-                print(f"Connected to {SERVER_HOST}:{SERVER_PORT}")
-                while True:
-                    records = []
-                    for _ in range(SAMPLES):
-                        rec = sensor.get_record()
-                        if prev_temp is not None and significantChange(rec["bme_temp_c"], prev_temp, 0.25):
-                            print(f"Temp changed from {prev_temp} to {rec['bme_temp_c']} -> skipping")
-                            continue
-                        records.append(rec)
-                        time.sleep(PERIOD_S / SAMPLES)
-
-                    if not records:
-                        continue
-
-                    rec = {
-                        "timestamp": records[0]["timestamp"],
-                        "bme_temp_c": sum([r["bme_temp_c"] for r in records]) / len(records),
-                        "bme_pressure_hpa": sum([r["bme_pressure_hpa"] for r in records]) / len(records),
-                        "bme_humidity_pct": sum([r["bme_humidity_pct"] for r in records]) / len(records),
-                        "cpu_temp_c": sum([r["cpu_temp_c"] for r in records]) / len(records),
-                    }
-
-                    # blend with previous value for extra smoothness
-                    if prev_rec is not None:
-                        alpha = SMOOTHING
-                        rec["bme_temp_c"] = alpha * rec["bme_temp_c"] + (1 - alpha) * prev_rec["bme_temp_c"]
-                        rec["bme_pressure_hpa"] = alpha * rec["bme_pressure_hpa"] + (1 - alpha) * prev_rec["bme_pressure_hpa"]
-                        rec["bme_humidity_pct"] = alpha * rec["bme_humidity_pct"] + (1 - alpha) * prev_rec["bme_humidity_pct"]
-                        rec["cpu_temp_c"] = alpha * rec["cpu_temp_c"] + (1 - alpha) * prev_rec["cpu_temp_c"]
-
-                    s.sendall(f"{rec['timestamp']},{rec['bme_temp_c']},"
-                              f"{rec['bme_pressure_hpa']},{rec['bme_humidity_pct']},"
-                              f"{rec['cpu_temp_c']}\n".encode())
-                    print(f"Sent -> {rec}")
-                    prev_temp = rec["bme_temp_c"]
-                    prev_rec = rec
-
-        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, OSError) as e:
-            print(f"Connection lost: {e}. Reconnecting in 5s...")
+            resp = requests.post(SERVER_URL, json=rec, timeout=10)
+            if resp.status_code == 200:
+                print(f"Sent -> {rec}")
+                prev_rec = rec
+            else:
+                print(f"Server error {resp.status_code}: {resp.text}")
+        except requests.exceptions.RequestException as e:
+            print(f"POST failed: {e}. Retrying in 5s...")
             time.sleep(5)
 
