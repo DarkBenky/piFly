@@ -36,8 +36,15 @@ def _convert_temp(val, unit):
     return _to_fahrenheit(val) if unit == "f" else val
 
 
-def initDB():
+def _get_conn():
     conn = sqlite3.connect("temperature.db")
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA busy_timeout=5000")
+    return conn
+
+
+def initDB():
+    conn = _get_conn()
     c = conn.cursor()
     c.execute(
         "CREATE TABLE IF NOT EXISTS temperature "
@@ -52,7 +59,7 @@ def initDB():
 
 
 def addRecord(rec):
-    conn = sqlite3.connect("temperature.db")
+    conn = _get_conn()
     c = conn.cursor()
     c.execute(
         "INSERT OR IGNORE INTO temperature VALUES (?, ?, ?, ?, ?)",
@@ -80,7 +87,7 @@ def migrateOldLogFiles(path: str):
 
 
 def _query(hours=None, start=None, end=None, downsample=True):
-    conn = sqlite3.connect("temperature.db")
+    conn = _get_conn()
     c = conn.cursor()
 
     # auto-downsample long ranges (>7 days) to hourly averages
