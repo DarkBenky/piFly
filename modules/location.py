@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from pprint import pprint
 import numpy
 import time
+import json
 
 BASELINE_SAMPLES = 1_000
 
@@ -115,6 +116,12 @@ if __name__ == "__main__":
 
     pprint(IMU_STATIC)
     pprint(PRESSURE_STATIC)
+
+    with open(f"./logs/baseline_{time.time()}.json", "w") as f:
+        f.write(json.dumps({
+            "imu": IMU_STATIC.__dict__,
+            "pressure": PRESSURE_STATIC.__dict__
+        }))
 
     
     
