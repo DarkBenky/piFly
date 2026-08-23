@@ -105,13 +105,20 @@ def getBaselineIMU(samples: int, imu: IMU) -> IMU_STATIC_OFFSETS:
 
 def getBaselinePressure(samples: int, bme: BME280) -> PRESSURE_STATIC_OFFSET:
     readings = []
-    for i in range(samples):
-        time.sleep(0.01)
-        readings.append(bme.get_record()["bme_pressure_hpa"])
-        if i % 32 == 0:
-            print(f"Pressure: {readings[-1]}, iter: {i} / {samples}")
-    std = numpy.std(readings)
-    return PRESSURE_STATIC_OFFSET(numpy.mean(readings), std)
+    rejects = 0
+    while len(readings) < samples:
+        time.sleep(0.05)
+        val = bme.get_record()["bme_pressure_hpa"]
+        if not 300.0 < val < 1100.0:
+            rejects += 1
+            continue
+        readings.append(val)
+        if len(readings) % 32 == 0:
+            print(f"Pressure: {val}, iter: {len(readings)} / {samples}, rejects: {rejects}")
+
+    med = numpy.median(readings)
+    clean = [v for v in readings if abs(v - med) < 20.0]
+    return PRESSURE_STATIC_OFFSET(numpy.median(clean), numpy.std(clean))
 
 
 IMU_STATIC = None
