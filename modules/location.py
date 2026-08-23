@@ -68,9 +68,14 @@ class PRESSURE_STATIC_OFFSET:
     pressure: float
     stdPressure: float
 
-    def __init__(self, pressure: float, stdPressure: float):
+    temperature: float
+    stdTemperature: float
+
+    def __init__(self, pressure: float, stdPressure: float, temperature: float, stdTemperature: float):
         self.pressure = pressure
         self.stdPressure = stdPressure
+        self.temperature = temperature
+        self.stdTemperature = stdTemperature
 
 def getBaselineIMU(samples: int, imu: IMU) -> IMU_STATIC_OFFSETS:
     readings = []
@@ -108,23 +113,57 @@ def getBaselinePressure(samples: int, bme: BME280) -> PRESSURE_STATIC_OFFSET:
     rejects = 0
     while len(readings) < samples:
         time.sleep(0.05)
-        val = bme.get_record()["bme_pressure_hpa"]
+        rec = bme.get_record()
+        val = rec["bme_pressure_hpa"]
+        temp = rec["bme_temp_c"]
         if not 300.0 < val < 1100.0:
             rejects += 1
             continue
-        readings.append(val)
+        if not 0.0 < temp < 50.0:
+            rejects += 1
+            continue
+
+        readings.append({"pressure": val, "temperature": temp})
         if len(readings) % 32 == 0:
             print(f"Pressure: {val}, iter: {len(readings)} / {samples}, rejects: {rejects}")
 
-    med = numpy.median(readings)
-    clean = [v for v in readings if abs(v - med) < 20.0]
-    return PRESSURE_STATIC_OFFSET(numpy.median(clean), numpy.std(clean))
+    pressures = [r["pressure"] for r in readings]
+    temps = [r["temperature"] for r in readings]
+
+    medPressure = numpy.median(pressures)
+    stdPressure = numpy.std(pressures)
+
+    medTemp = numpy.median(temps)
+    stdTemp = numpy.std(temps)
+
+    SIGMA = 3.0
+    if stdPressure > 0:
+        keep = [
+            i for i, p in enumerate(pressures)
+            if abs(p - medPressure) <= SIGMA * stdPressure
+        ]
+        cleanPressure = [pressures[i] for i in keep]
+        cleanTemp = [temps[i] for i in keep]
+    else:
+        cleanPressure = pressures
+        cleanTemp = temps
+
+    print(f"Baseline: {numpy.median(cleanPressure):.2f} hPa (std {numpy.std(cleanPressure):.3f}), "
+          f"temp {numpy.median(cleanTemp):.1f}C (std {numpy.std(cleanTemp):.3f}), "
+          f"{len(readings) - len(cleanPressure)} sigma-clipped, {rejects} range-rejected")
+
+    return PRESSURE_STATIC_OFFSET(
+        numpy.median(cleanPressure), numpy.std(cleanPressure),
+        numpy.median(cleanTemp), numpy.std(cleanTemp),
+    )
 
 
 IMU_STATIC = None
 PRESSURE_STATIC = None
 
 if __name__ == "__main__":
+    from tracking import track
+
     imu = IMU()
     bme = BME280()
 
@@ -142,6 +181,8 @@ if __name__ == "__main__":
             "pressure": PRESSURE_STATIC.__dict__
         }))
     print(f"Saved -> {path}")
+
+    track(IMU_STATIC, PRESSURE_STATIC)
 
     
     
