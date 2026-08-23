@@ -72,6 +72,17 @@ def pressure_to_altitude(p_hpa, baseline_hpa, temp_c=15.0):
     return (t_k / 0.0065) * (1 - (p_hpa / baseline_hpa) ** (0.0065 * 287.05 / 9.80665))
 
 
+def integrate_gyro(q, gx, gy, gz, dt):
+    w, x, y, z = q
+    dqw = (-x * gx - y * gy - z * gz) * dt / 2
+    dqx = (w * gx + y * gz - z * gy) * dt / 2
+    dqy = (w * gy - x * gz + z * gx) * dt / 2
+    dqz = (w * gz + x * gy - y * gx) * dt / 2
+    w, x, y, z = w + dqw, x + dqx, y + dqy, z + dqz
+    n = math.sqrt(w * w + x * x + y * y + z * z) or 1.0
+    return [w / n, x / n, y / n, z / n]
+
+
 def rotate_vector(q, v):
     w, x, y, z = q
     vx, vy, vz = v

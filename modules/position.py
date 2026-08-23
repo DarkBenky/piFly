@@ -1,9 +1,10 @@
+import math
 import time
 from dataclasses import dataclass
 
 from imu import IMU
 from temperature import BME280
-from navigation import MahonyFilter, quat_to_euler, pressure_to_altitude, rotate_vector
+from navigation import MahonyFilter, quat_to_euler, pressure_to_altitude, rotate_vector, integrate_gyro
 from location import IMU_STATIC_OFFSETS, PRESSURE_STATIC_OFFSET
 
 
@@ -30,18 +31,30 @@ def stateToPosDir(state: dict) -> PosDir:
 class Position:
     def __init__(self, imu_stat: IMU_STATIC_OFFSETS, pressure_stat: PRESSURE_STATIC_OFFSET,
                  imu: IMU = None, bme: BME280 = None,
-                 alt_smoothing: float = 0.15, bme_interval: float = 0.5):
+                 alt_smoothing: float = 0.15, bme_interval: float = 0.5,
+                 still_accel: float = 0.05, still_ticks: int = 20):
         self.imu_stat = imu_stat
         self.pressure_stat = pressure_stat
         self.imu = imu if imu is not None else IMU()
         self.bme = bme if bme is not None else BME280()
         self.alt_smoothing = alt_smoothing
         self.bme_interval = bme_interval
+        self.still_accel = still_accel
+        self.still_ticks = still_ticks
 
         self.filt = MahonyFilter(imu_stat)
         self.acc_bias = (imu_stat.xAcceleration, imu_stat.yAcceleration,
                          imu_stat.zAcceleration - 9.80665)
         self.mag_bias = (imu_stat.xMagneto, imu_stat.yMagneto, imu_stat.zMagneto)
+
+        self.q_dr = [1.0, 0.0, 0.0, 0.0]
+        self.px = 0.0
+        self.py = 0.0
+        self.pz = 0.0
+        self.vx = 0.0
+        self.vy = 0.0
+        self.vz = 0.0
+        self._still_count = 0
 
         self._last_t = None
         self._last_bme = None
@@ -49,7 +62,15 @@ class Position:
         self._bme = None
 
     def reset(self):
+        self.q_dr = [1.0, 0.0, 0.0, 0.0]
         self.filt = MahonyFilter(self.imu_stat)
+        self.px = 0.0
+        self.py = 0.0
+        self.pz = 0.0
+        self.vx = 0.0
+        self.vy = 0.0
+        self.vz = 0.0
+        self._still_count = 0
         self._last_t = None
         self._last_bme = None
         self._alt = None
@@ -64,17 +85,45 @@ class Position:
             dt = min(max(now - self._last_t, 1e-4), 0.05)
         self._last_t = now
 
+        ax_c = rec.xAcceleration - self.acc_bias[0]
+        ay_c = rec.yAcceleration - self.acc_bias[1]
+        az_c = rec.zAcceleration - self.acc_bias[2]
+
         self.filt.update(
             rec.xGyro, rec.yGyro, rec.zGyro,
-            rec.xAcceleration - self.acc_bias[0],
-            rec.yAcceleration - self.acc_bias[1],
-            rec.zAcceleration - self.acc_bias[2],
+            ax_c, ay_c, az_c,
             rec.xMagneto - self.mag_bias[0],
             rec.yMagneto - self.mag_bias[1],
             rec.zMagneto - self.mag_bias[2],
             dt,
         )
         roll, pitch, yaw = quat_to_euler(self.filt.q)
+
+        gx_d = rec.xGyro - self.imu_stat.xGyro
+        gy_d = rec.yGyro - self.imu_stat.yGyro
+        gz_d = rec.zGyro - self.imu_stat.zGyro
+        self.q_dr = integrate_gyro(self.q_dr, gx_d, gy_d, gz_d, dt)
+
+        awx, awy, awz = rotate_vector(self.q_dr, (ax_c, ay_c, az_c))
+        awz -= 9.80665
+
+        accel_mag = math.sqrt(ax_c * ax_c + ay_c * ay_c + (az_c - 9.80665) ** 2)
+        if accel_mag < self.still_accel:
+            self._still_count += 1
+        else:
+            self._still_count = 0
+
+        if self._still_count >= self.still_ticks:
+            self.vx = 0.0
+            self.vy = 0.0
+            self.vz = 0.0
+        else:
+            self.vx += awx * dt
+            self.vy += awy * dt
+            self.vz += awz * dt
+            self.px += self.vx * dt
+            self.py += self.vy * dt
+            self.pz += self.vz * dt
 
         if self._last_bme is None or now - self._last_bme >= self.bme_interval:
             b = self.bme.get_record()
@@ -95,8 +144,10 @@ class Position:
             "timestamp": time.time(),
             "qw": q[0], "qx": q[1], "qy": q[2], "qz": q[3],
             "roll": roll, "pitch": pitch, "yaw": yaw,
-            "x_m": 0.0, "y_m": 0.0, "z_m": alt,
+            "x_m": self.px, "y_m": self.py, "z_m": alt,
             "alt_m": alt,
+            "vx_m_s": self.vx, "vy_m_s": self.vy, "vz_m_s": self.vz,
+            "moving": self._still_count < self.still_ticks,
             "pressure_hpa": self._bme["bme_pressure_hpa"] if self._bme else 0.0,
             "temp_c": self._bme["bme_temp_c"] if self._bme else 0.0,
             "humidity_pct": self._bme["bme_humidity_pct"] if self._bme else 0.0,
