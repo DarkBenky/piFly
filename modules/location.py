@@ -3,6 +3,7 @@ from temperature import BME280
 from dataclasses import dataclass
 from pprint import pprint
 import numpy
+import time
 
 BASELINE_SAMPLES = 1_000
 
@@ -68,7 +69,12 @@ class PRESSURE_STATIC_OFFSET:
 def getBaselineIMU(samples: int, imu: IMU) -> IMU_STATIC_OFFSETS:
     readings = []
     for i in range(samples):
+        time.sleep(0.01)
         readings.append(imu.get_record())
+        if i % 32 == 0:
+            print(f"iter: {i} / {samples}")
+            pprint(readings[-1])
+
     return IMU_STATIC_OFFSETS(
         numpy.mean([r.xAcceleration for r in readings]), numpy.std([r.xAcceleration for r in readings]),
         numpy.mean([r.yAcceleration for r in readings]), numpy.std([r.yAcceleration for r in readings]),
@@ -86,7 +92,10 @@ def getBaselineIMU(samples: int, imu: IMU) -> IMU_STATIC_OFFSETS:
 def getBaselinePressure(samples: int, bme: BME280) -> PRESSURE_STATIC_OFFSET:
     readings = []
     for i in range(samples):
+        time.sleep(0.01)
         readings.append(bme.get_record()["bme_pressure_hpa"])
+        if i % 32 == 0:
+            print(f"Pressure: {readings[-1]}, iter: {i} / {samples}")
     std = numpy.std(readings)
     return PRESSURE_STATIC_OFFSET(numpy.mean(readings), std)
 
