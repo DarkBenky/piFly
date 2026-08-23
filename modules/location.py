@@ -82,17 +82,25 @@ def getBaselineIMU(samples: int, imu: IMU) -> IMU_STATIC_OFFSETS:
             pprint(readings[-1])
 
     return IMU_STATIC_OFFSETS(
-        numpy.mean([r.xAcceleration for r in readings]), numpy.std([r.xAcceleration for r in readings]),
-        numpy.mean([r.yAcceleration for r in readings]), numpy.std([r.yAcceleration for r in readings]),
-        numpy.mean([r.zAcceleration for r in readings]), numpy.std([r.zAcceleration for r in readings]),
+        numpy.mean([r.xAcceleration for r in readings]),
+        numpy.mean([r.yAcceleration for r in readings]),
+        numpy.mean([r.zAcceleration for r in readings]),
+        numpy.mean([r.xGyro for r in readings]),
+        numpy.mean([r.yGyro for r in readings]),
+        numpy.mean([r.zGyro for r in readings]),
+        numpy.mean([r.xMagneto for r in readings]),
+        numpy.mean([r.yMagneto for r in readings]),
+        numpy.mean([r.zMagneto for r in readings]),
 
-        numpy.mean([r.xGyro for r in readings]), numpy.std([r.xGyro for r in readings]),
-        numpy.mean([r.yGyro for r in readings]), numpy.std([r.yGyro for r in readings]),
-        numpy.mean([r.zGyro for r in readings]), numpy.std([r.zGyro for r in readings]),
-
-        numpy.mean([r.xMagneto for r in readings]), numpy.std([r.xMagneto for r in readings]),
-        numpy.mean([r.yMagneto for r in readings]), numpy.std([r.yMagneto for r in readings]),
-        numpy.mean([r.zMagneto for r in readings]), numpy.std([r.zMagneto for r in readings])
+        numpy.std([r.xAcceleration for r in readings]),
+        numpy.std([r.yAcceleration for r in readings]),
+        numpy.std([r.zAcceleration for r in readings]),
+        numpy.std([r.xGyro for r in readings]),
+        numpy.std([r.yGyro for r in readings]),
+        numpy.std([r.zGyro for r in readings]),
+        numpy.std([r.xMagneto for r in readings]),
+        numpy.std([r.yMagneto for r in readings]),
+        numpy.std([r.zMagneto for r in readings])
     )
 
 def getBaselinePressure(samples: int, bme: BME280) -> PRESSURE_STATIC_OFFSET:
