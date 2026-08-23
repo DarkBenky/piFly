@@ -23,10 +23,17 @@
   .dot { width: 8px; height: 8px; border-radius: 50%; background: #e55; }
   .dot.on { background: #5fd6a8; box-shadow: 0 0 8px #5fd6a8; }
   .hint { position: fixed; bottom: 10px; left: 12px; z-index: 10; color: #555; font-size: .72rem; }
+  #fbwrap { display: none; position: fixed; inset: 0; align-items: center; justify-content: center; }
+  body.fallback #fbwrap { display: flex; }
+  #fbwrap canvas { max-width: 92vmin; max-height: 92vmin; }
+  .fallback-note { display: none; position: fixed; bottom: 10px; right: 12px; z-index: 10; color: #666; font-size: .72rem; }
+  body.fallback .fallback-note { display: block; }
 </style>
 </head>
 <body>
 <div id="scene"></div>
+<div id="fbwrap"><canvas id="fbc" width="420" height="420"></canvas></div>
+<div class="fallback-note">WebGL unavailable — 2D fallback</div>
 <div class="hud">
   <h1>piFly — orientation</h1>
   <div class="row"><span class="lbl">roll</span><span class="val" id="roll">--</span></div>
@@ -41,80 +48,105 @@
 <div class="hint">green ring = baseline · drag to orbit · scroll to zoom · right-drag to pan</div>
 
 <script>
-const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x0e0e13);
-scene.fog = new THREE.Fog(0x0e0e13, 40, 90);
-
-const camera = new THREE.PerspectiveCamera(55, innerWidth / innerHeight, 0.1, 200);
-camera.position.set(9, 5, 9);
-
-const renderer = new THREE.WebGLRenderer({ antialias: true });
-renderer.setPixelRatio(devicePixelRatio);
-renderer.setSize(innerWidth, innerHeight);
-document.getElementById('scene').appendChild(renderer.domElement);
-
-const controls = new THREE.OrbitControls(camera, renderer.domElement);
-controls.target.set(0, 0, 0);
-controls.enableDamping = true;
-
-scene.add(new THREE.AmbientLight(0x8899aa, 0.9));
-const sun = new THREE.DirectionalLight(0xffffff, 1.0);
-sun.position.set(8, 14, 6);
-scene.add(sun);
-
-scene.add(new THREE.GridHelper(60, 60, 0x333344, 0x1c1c26));
-
-const drone = new THREE.Group();
-const matBody = new THREE.MeshStandardMaterial({ color: 0x9db8d2, roughness: 0.6 });
-const matWing = new THREE.MeshStandardMaterial({ color: 0xe8a33d, roughness: 0.6 });
-const matNose = new THREE.MeshStandardMaterial({ color: 0xd8554d, roughness: 0.5 });
-const fuselage = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.22, 1.5), matBody);
-const wing = new THREE.Mesh(new THREE.BoxGeometry(2.4, 0.05, 0.42), matWing);
-wing.position.z = -0.1;
-const tail = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.05, 0.34), matWing);
-tail.position.z = -0.62;
-const fin = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.5, 0.34), matBody);
-fin.position.set(0, 0.28, -0.62);
-const nose = new THREE.Mesh(new THREE.ConeGeometry(0.2, 0.45, 16), matNose);
-nose.rotation.x = Math.PI / 2;
-nose.position.z = 0.95;
-drone.add(fuselage, wing, tail, fin, nose);
-scene.add(drone);
-
-const TRAIL_MAX = 900;
-const trailGeo = new THREE.BufferGeometry();
-trailGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(TRAIL_MAX * 3), 3));
-trailGeo.setDrawRange(0, 0);
-const trail = new THREE.Line(trailGeo,
-    new THREE.LineBasicMaterial({ color: 0x66ccff, transparent: true, opacity: 0.7 }));
-scene.add(trail);
-
-const BASELINE = new THREE.Vector3(0, 0, 0);
-
-const baseRing = new THREE.Mesh(
-    new THREE.TorusGeometry(0.9, 0.045, 8, 64),
-    new THREE.MeshBasicMaterial({ color: 0x7ee6a8 }));
-baseRing.rotation.x = Math.PI / 2;
-baseRing.position.y = 0.02;
-scene.add(baseRing);
-
-const baseCross = new THREE.Line(
-    new THREE.BufferGeometry().setFromPoints([
-        new THREE.Vector3(-1.4, 0.03, 0), new THREE.Vector3(1.4, 0.03, 0),
-        new THREE.Vector3(0, 0.03, -1.4), new THREE.Vector3(0, 0.03, 1.4),
-    ]),
-    new THREE.LineBasicMaterial({ color: 0x7ee6a8, transparent: true, opacity: 0.8 }));
-scene.add(baseCross);
-
-const offsetGeo = new THREE.BufferGeometry().setFromPoints([BASELINE.clone(), BASELINE.clone()]);
-const offsetLine = new THREE.Line(offsetGeo,
-    new THREE.LineDashedMaterial({ color: 0xffffff, dashSize: 0.3, gapSize: 0.18,
-                                   transparent: true, opacity: 0.55 }));
-scene.add(offsetLine);
-
 const $ = id => document.getElementById(id);
+const TRAIL_MAX = 900;
+const S = { roll: 0, pitch: 0, yaw: 0, alt: 0, x: 0, y: 0, z: 0 };
+
+function webglAvailable() {
+  try {
+    const c = document.createElement('canvas');
+    return !!(window.WebGLRenderingContext &&
+        (c.getContext('webgl') || c.getContext('experimental-webgl')));
+  } catch (e) {
+    return false;
+  }
+}
+
+let threeOK = false;
+let scene, camera, renderer, controls, drone, trailGeo, offsetGeo, offsetLine;
+
+if (webglAvailable()) {
+  try {
+    scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x0e0e13);
+    scene.fog = new THREE.Fog(0x0e0e13, 40, 90);
+
+    camera = new THREE.PerspectiveCamera(55, innerWidth / innerHeight, 0.1, 200);
+    camera.position.set(9, 5, 9);
+
+    renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setPixelRatio(devicePixelRatio);
+    renderer.setSize(innerWidth, innerHeight);
+    document.getElementById('scene').appendChild(renderer.domElement);
+
+    controls = new THREE.OrbitControls(camera, renderer.domElement);
+    controls.target.set(0, 0, 0);
+    controls.enableDamping = true;
+
+    scene.add(new THREE.AmbientLight(0x8899aa, 0.9));
+    const sun = new THREE.DirectionalLight(0xffffff, 1.0);
+    sun.position.set(8, 14, 6);
+    scene.add(sun);
+
+    scene.add(new THREE.GridHelper(60, 60, 0x333344, 0x1c1c26));
+
+    drone = new THREE.Group();
+    const matBody = new THREE.MeshStandardMaterial({ color: 0x9db8d2, roughness: 0.6 });
+    const matWing = new THREE.MeshStandardMaterial({ color: 0xe8a33d, roughness: 0.6 });
+    const matNose = new THREE.MeshStandardMaterial({ color: 0xd8554d, roughness: 0.5 });
+    const fuselage = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.22, 1.5), matBody);
+    const wing = new THREE.Mesh(new THREE.BoxGeometry(2.4, 0.05, 0.42), matWing);
+    wing.position.z = -0.1;
+    const tail = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.05, 0.34), matWing);
+    tail.position.z = -0.62;
+    const fin = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.5, 0.34), matBody);
+    fin.position.set(0, 0.28, -0.62);
+    const nose = new THREE.Mesh(new THREE.ConeGeometry(0.2, 0.45, 16), matNose);
+    nose.rotation.x = Math.PI / 2;
+    nose.position.z = 0.95;
+    drone.add(fuselage, wing, tail, fin, nose);
+    scene.add(drone);
+
+    trailGeo = new THREE.BufferGeometry();
+    trailGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(TRAIL_MAX * 3), 3));
+    trailGeo.setDrawRange(0, 0);
+    const trail = new THREE.Line(trailGeo,
+        new THREE.LineBasicMaterial({ color: 0x66ccff, transparent: true, opacity: 0.7 }));
+    scene.add(trail);
+
+    const BASELINE = new THREE.Vector3(0, 0, 0);
+    const baseRing = new THREE.Mesh(
+        new THREE.TorusGeometry(0.9, 0.045, 8, 64),
+        new THREE.MeshBasicMaterial({ color: 0x7ee6a8 }));
+    baseRing.rotation.x = Math.PI / 2;
+    baseRing.position.y = 0.02;
+    scene.add(baseRing);
+    const baseCross = new THREE.Line(
+        new THREE.BufferGeometry().setFromPoints([
+            new THREE.Vector3(-1.4, 0.03, 0), new THREE.Vector3(1.4, 0.03, 0),
+            new THREE.Vector3(0, 0.03, -1.4), new THREE.Vector3(0, 0.03, 1.4),
+        ]),
+        new THREE.LineBasicMaterial({ color: 0x7ee6a8, transparent: true, opacity: 0.8 }));
+    scene.add(baseCross);
+
+    offsetGeo = new THREE.BufferGeometry().setFromPoints([BASELINE.clone(), BASELINE.clone()]);
+    offsetLine = new THREE.Line(offsetGeo,
+        new THREE.LineDashedMaterial({ color: 0xffffff, dashSize: 0.3, gapSize: 0.18,
+                                       transparent: true, opacity: 0.55 }));
+    scene.add(offsetLine);
+
+    threeOK = true;
+  } catch (e) {
+    console.warn('3D init failed:', e);
+  }
+}
+
+if (!threeOK) {
+  document.body.classList.add('fallback');
+}
 
 function setTrail(history) {
+  if (!threeOK) return;
   const n = Math.min(history.length, TRAIL_MAX);
   const pos = trailGeo.attributes.position.array;
   for (let i = 0; i < n; i++) {
@@ -124,6 +156,68 @@ function setTrail(history) {
   }
   trailGeo.attributes.position.needsUpdate = true;
   trailGeo.setDrawRange(0, n);
+}
+
+function update3D(latest) {
+  drone.quaternion.set(latest.qx, latest.qy, latest.qz, latest.qw);
+  drone.position.set(latest.x_m || 0, latest.alt_m || 0, latest.y_m || 0);
+  offsetGeo.setFromPoints([new THREE.Vector3(0, 0, 0), drone.position.clone()]);
+  offsetGeo.attributes.position.needsUpdate = true;
+  offsetLine.computeLineDistances();
+}
+
+function drawFallback() {
+  const c = $('fbc');
+  if (!c) return;
+  const ctx = c.getContext('2d');
+  const W = c.width, H = c.height, cx = W / 2, cy = H / 2;
+  const R = Math.min(W, H) / 2 - 14;
+  const k = 2.2;
+
+  ctx.clearRect(0, 0, W, H);
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(cx, cy, R, 0, Math.PI * 2);
+  ctx.clip();
+
+  ctx.fillStyle = '#2b4a68';
+  ctx.fillRect(cx - R, cy - R, R * 2, R * 2);
+
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.rotate(-S.roll * Math.PI / 180);
+  const hy = S.pitch * k;
+  ctx.fillStyle = '#5c4430';
+  ctx.fillRect(-R * 2, hy, R * 4, R * 2);
+  ctx.strokeStyle = '#fff';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(-R, hy);
+  ctx.lineTo(R, hy);
+  ctx.stroke();
+  ctx.restore();
+  ctx.restore();
+
+  ctx.beginPath();
+  ctx.arc(cx, cy, R, 0, Math.PI * 2);
+  ctx.strokeStyle = '#3a3a44';
+  ctx.lineWidth = 3;
+  ctx.stroke();
+
+  ctx.strokeStyle = '#ffd24a';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(cx - 44, cy);
+  ctx.lineTo(cx + 44, cy);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(cx, cy - 8);
+  ctx.lineTo(cx, cy + 8);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.arc(cx, cy, 4, 0, Math.PI * 2);
+  ctx.fillStyle = '#ffd24a';
+  ctx.fill();
 }
 
 async function poll() {
@@ -136,18 +230,20 @@ async function poll() {
     }
     $('dot').classList.add('on');
     $('status').textContent = 'live · ' + new Date(d.latest.timestamp * 1000).toLocaleTimeString();
-    drone.quaternion.set(d.latest.qx, d.latest.qy, d.latest.qz, d.latest.qw);
-    drone.position.set(d.latest.x_m || 0, d.latest.alt_m || 0, d.latest.y_m || 0);
-    offsetGeo.setFromPoints([BASELINE, drone.position.clone()]);
-    offsetGeo.attributes.position.needsUpdate = true;
-    offsetLine.computeLineDistances();
+    S.roll = d.latest.roll || 0;
+    S.pitch = d.latest.pitch || 0;
+    S.yaw = d.latest.yaw || 0;
+    S.alt = d.latest.alt_m || 0;
+    S.x = d.latest.x_m || 0;
+    S.y = d.latest.y_m || 0;
+    S.z = S.alt;
+    if (threeOK) update3D(d.latest);
     setTrail(d.history);
-    $('roll').textContent = d.latest.roll.toFixed(1) + '°';
-    $('pitch').textContent = d.latest.pitch.toFixed(1) + '°';
-    $('yaw').textContent = d.latest.yaw.toFixed(1) + '°';
-    $('alt').textContent = d.latest.alt_m.toFixed(1) + ' m';
-    const dx = d.latest.x_m || 0, dy = d.latest.y_m || 0, dz = d.latest.alt_m || 0;
-    $('off').textContent = Math.hypot(dx, dy, dz).toFixed(1) + ' m';
+    $('roll').textContent = S.roll.toFixed(1) + '°';
+    $('pitch').textContent = S.pitch.toFixed(1) + '°';
+    $('yaw').textContent = S.yaw.toFixed(1) + '°';
+    $('alt').textContent = S.alt.toFixed(1) + ' m';
+    $('off').textContent = Math.hypot(S.x, S.y, S.z).toFixed(1) + ' m';
     $('pres').textContent = d.latest.pressure_hpa.toFixed(2) + ' hPa';
     $('temp').textContent = d.latest.temp_c.toFixed(1) + ' °C';
   } catch (e) {
@@ -157,6 +253,7 @@ async function poll() {
 }
 
 addEventListener('resize', () => {
+  if (!threeOK) return;
   camera.aspect = innerWidth / innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(innerWidth, innerHeight);
@@ -167,8 +264,12 @@ poll();
 
 (function animate() {
   requestAnimationFrame(animate);
-  controls.update();
-  renderer.render(scene, camera);
+  if (threeOK) {
+    controls.update();
+    renderer.render(scene, camera);
+  } else {
+    drawFallback();
+  }
 })();
 </script>
 </body>
