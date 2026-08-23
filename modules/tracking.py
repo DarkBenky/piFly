@@ -4,10 +4,8 @@ import time
 
 import requests
 
-from imu import IMU
-from temperature import BME280
-from navigation import MahonyFilter, quat_to_euler, pressure_to_altitude
 from location import IMU_STATIC_OFFSETS, PRESSURE_STATIC_OFFSET
+from position import Position
 
 LOCATION_UI_URL = "http://91.98.145.193:5001/api/ingest"
 
@@ -36,19 +34,8 @@ def loadBaseline(path: str):
 
 def track(imu_stat: IMU_STATIC_OFFSETS, pressure_stat: PRESSURE_STATIC_OFFSET,
           post_url: str = LOCATION_UI_URL, post_interval: float = 0.2):
-    imu = IMU()
-    bme = BME280()
-    filt = MahonyFilter(imu_stat)
-
-    acc_bias = (imu_stat.xAcceleration, imu_stat.yAcceleration,
-                imu_stat.zAcceleration - 9.80665)
-    mag_bias = (imu_stat.xMagneto, imu_stat.yMagneto, imu_stat.zMagneto)
-
+    pos = Position(imu_stat, pressure_stat)
     session = requests.Session()
-    state = None
-    alt_smooth = None
-    t_prev = time.monotonic()
-    last_bme = 0.0
     last_post = 0.0
     last_print = 0.0
     last_warn = 0.0
@@ -56,45 +43,10 @@ def track(imu_stat: IMU_STATIC_OFFSETS, pressure_stat: PRESSURE_STATIC_OFFSET,
     print(f"Streaming attitude + altitude -> {post_url}")
     try:
         while True:
-            rec = imu.get_record()
+            state = pos.getPosition()
             now = time.monotonic()
-            dt = min(max(now - t_prev, 1e-4), 0.05)
-            t_prev = now
 
-            filt.update(
-                rec.xGyro, rec.yGyro, rec.zGyro,
-                rec.xAcceleration - acc_bias[0],
-                rec.yAcceleration - acc_bias[1],
-                rec.zAcceleration - acc_bias[2],
-                rec.xMagneto - mag_bias[0],
-                rec.yMagneto - mag_bias[1],
-                rec.zMagneto - mag_bias[2],
-                dt,
-            )
-            roll, pitch, yaw = quat_to_euler(filt.q)
-
-            if now - last_bme >= 0.5:
-                b = bme.get_record()
-                p = b["bme_pressure_hpa"]
-                if 300.0 < p < 1100.0:
-                    alt_raw = pressure_to_altitude(p, pressure_stat.pressure,
-                                                   temp_c=b["bme_temp_c"])
-                    if alt_smooth is None:
-                        alt_smooth = alt_raw
-                    elif abs(alt_raw - alt_smooth) < 5.0:
-                        alt_smooth += 0.15 * (alt_raw - alt_smooth)
-                    state = {
-                        "timestamp": time.time(),
-                        "roll": roll, "pitch": pitch, "yaw": yaw,
-                        "qw": filt.q[0], "qx": filt.q[1], "qy": filt.q[2], "qz": filt.q[3],
-                        "x_m": 0.0, "y_m": 0.0,
-                        "alt_m": alt_smooth,
-                        "pressure_hpa": p,
-                        "temp_c": b["bme_temp_c"],
-                    }
-                last_bme = now
-
-            if state is not None and now - last_post >= post_interval:
+            if now - last_post >= post_interval:
                 try:
                     r = session.post(post_url, json=state, timeout=2)
                     if r.status_code != 200 and now - last_warn >= 5.0:
@@ -106,8 +58,8 @@ def track(imu_stat: IMU_STATIC_OFFSETS, pressure_stat: PRESSURE_STATIC_OFFSET,
                         last_warn = now
                 last_post = now
 
-            if state is not None and now - last_print >= 1.0:
-                print(f"roll {roll:7.1f}  pitch {pitch:7.1f}  yaw {yaw:7.1f}  |  "
+            if now - last_print >= 1.0:
+                print(f"roll {state['roll']:7.1f}  pitch {state['pitch']:7.1f}  yaw {state['yaw']:7.1f}  |  "
                       f"alt {state['alt_m']:+7.1f} m  |  {state['pressure_hpa']:.1f} hPa")
                 last_print = now
 

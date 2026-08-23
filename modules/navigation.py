@@ -70,3 +70,13 @@ def quat_to_euler(q):
 def pressure_to_altitude(p_hpa, baseline_hpa, temp_c=15.0):
     t_k = temp_c + 273.15
     return (t_k / 0.0065) * (1 - (p_hpa / baseline_hpa) ** (0.0065 * 287.05 / 9.80665))
+
+
+def rotate_vector(q, v):
+    w, x, y, z = q
+    vx, vy, vz = v
+    return (
+        (1 - 2 * (y * y + z * z)) * vx + 2 * (x * y - z * w) * vy + 2 * (x * z + y * w) * vz,
+        2 * (x * y + z * w) * vx + (1 - 2 * (x * x + z * z)) * vy + 2 * (y * z - x * w) * vz,
+        2 * (x * z - y * w) * vx + 2 * (y * z + x * w) * vy + (1 - 2 * (x * x + y * y)) * vz,
+    )
