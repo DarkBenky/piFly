@@ -69,6 +69,7 @@ class PRESSURE_STATIC_OFFSET:
 
     def __init__(self, pressure: float, stdPressure: float):
         self.pressure = pressure
+        self.stdPressure = stdPressure
 
 def getBaselineIMU(samples: int, imu: IMU) -> IMU_STATIC_OFFSETS:
     readings = []
