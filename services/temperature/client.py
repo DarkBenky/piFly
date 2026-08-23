@@ -8,7 +8,7 @@ import time
 
 SERVER_URL = "http://91.98.145.193:5000/api/ingest"
 SAMPLES = 8
-PERIOD_S = 15
+PERIOD_S = 60
 SMOOTHING = 0.4  # blend 40% new value, 60% previous value
 
 

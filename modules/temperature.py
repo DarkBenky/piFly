@@ -18,6 +18,10 @@ class BME280:
         self.spi = board.SPI()
         self.cs = digitalio.DigitalInOut(board.D5)
         self.bme280 = adafruit_bme280.Adafruit_BME280_SPI(self.spi, self.cs)
+        self.bme280.overscan_temperature = adafruit_bme280.OVERSCAN_X1
+        self.bme280.overscan_pressure = adafruit_bme280.OVERSCAN_X1
+        self.bme280.overscan_humidity = adafruit_bme280.OVERSCAN_X1
+        self.bme280.mode = adafruit_bme280.MODE_FORCE
     
     def get_record(self):
         return {
@@ -53,4 +57,4 @@ if __name__ == "__main__":
                 f"{rec['cpu_temp_c']}\n"
             )
 
-        time.sleep(15)
+        time.sleep(60)
