@@ -32,12 +32,13 @@
   <div class="row"><span class="lbl">roll</span><span class="val" id="roll">--</span></div>
   <div class="row"><span class="lbl">pitch</span><span class="val" id="pitch">--</span></div>
   <div class="row"><span class="lbl">yaw</span><span class="val" id="yaw">--</span></div>
-  <div class="row"><span class="lbl">altitude</span><span class="val" id="alt">--</span></div>
+  <div class="row"><span class="lbl">alt (vs baseline)</span><span class="val" id="alt">--</span></div>
+  <div class="row"><span class="lbl">offset from baseline</span><span class="val" id="off">--</span></div>
   <div class="row"><span class="lbl">pressure</span><span class="val" id="pres">--</span></div>
   <div class="row"><span class="lbl">temp</span><span class="val" id="temp">--</span></div>
 </div>
 <div class="status"><span class="dot" id="dot"></span><span id="status">waiting for data…</span></div>
-<div class="hint">drag to orbit · scroll to zoom · right-drag to pan</div>
+<div class="hint">green ring = baseline · drag to orbit · scroll to zoom · right-drag to pan</div>
 
 <script>
 const scene = new THREE.Scene();
@@ -88,7 +89,29 @@ const trail = new THREE.Line(trailGeo,
     new THREE.LineBasicMaterial({ color: 0x66ccff, transparent: true, opacity: 0.7 }));
 scene.add(trail);
 
-let alt0 = null;
+const BASELINE = new THREE.Vector3(0, 0, 0);
+
+const baseRing = new THREE.Mesh(
+    new THREE.TorusGeometry(0.9, 0.045, 8, 64),
+    new THREE.MeshBasicMaterial({ color: 0x7ee6a8 }));
+baseRing.rotation.x = Math.PI / 2;
+baseRing.position.y = 0.02;
+scene.add(baseRing);
+
+const baseCross = new THREE.Line(
+    new THREE.BufferGeometry().setFromPoints([
+        new THREE.Vector3(-1.4, 0.03, 0), new THREE.Vector3(1.4, 0.03, 0),
+        new THREE.Vector3(0, 0.03, -1.4), new THREE.Vector3(0, 0.03, 1.4),
+    ]),
+    new THREE.LineBasicMaterial({ color: 0x7ee6a8, transparent: true, opacity: 0.8 }));
+scene.add(baseCross);
+
+const offsetGeo = new THREE.BufferGeometry().setFromPoints([BASELINE.clone(), BASELINE.clone()]);
+const offsetLine = new THREE.Line(offsetGeo,
+    new THREE.LineDashedMaterial({ color: 0xffffff, dashSize: 0.3, gapSize: 0.18,
+                                   transparent: true, opacity: 0.55 }));
+scene.add(offsetLine);
+
 const $ = id => document.getElementById(id);
 
 function setTrail(history) {
@@ -96,7 +119,7 @@ function setTrail(history) {
   const pos = trailGeo.attributes.position.array;
   for (let i = 0; i < n; i++) {
     pos[i * 3]     = history[i].x_m || 0;
-    pos[i * 3 + 1] = history[i].alt_m - alt0;
+    pos[i * 3 + 1] = history[i].alt_m || 0;
     pos[i * 3 + 2] = history[i].y_m || 0;
   }
   trailGeo.attributes.position.needsUpdate = true;
@@ -113,14 +136,18 @@ async function poll() {
     }
     $('dot').classList.add('on');
     $('status').textContent = 'live · ' + new Date(d.latest.timestamp * 1000).toLocaleTimeString();
-    if (alt0 === null) alt0 = d.latest.alt_m;
     drone.quaternion.set(d.latest.qx, d.latest.qy, d.latest.qz, d.latest.qw);
-    drone.position.set(d.latest.x_m || 0, d.latest.alt_m - alt0, d.latest.y_m || 0);
+    drone.position.set(d.latest.x_m || 0, d.latest.alt_m || 0, d.latest.y_m || 0);
+    offsetGeo.setFromPoints([BASELINE, drone.position.clone()]);
+    offsetGeo.attributes.position.needsUpdate = true;
+    offsetLine.computeLineDistances();
     setTrail(d.history);
     $('roll').textContent = d.latest.roll.toFixed(1) + '°';
     $('pitch').textContent = d.latest.pitch.toFixed(1) + '°';
     $('yaw').textContent = d.latest.yaw.toFixed(1) + '°';
     $('alt').textContent = d.latest.alt_m.toFixed(1) + ' m';
+    const dx = d.latest.x_m || 0, dy = d.latest.y_m || 0, dz = d.latest.alt_m || 0;
+    $('off').textContent = Math.hypot(dx, dy, dz).toFixed(1) + ' m';
     $('pres').textContent = d.latest.pressure_hpa.toFixed(2) + ' hPa';
     $('temp').textContent = d.latest.temp_c.toFixed(1) + ' °C';
   } catch (e) {
