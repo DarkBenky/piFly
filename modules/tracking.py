@@ -9,7 +9,7 @@ from temperature import BME280
 from navigation import MahonyFilter, quat_to_euler, pressure_to_altitude
 from location import IMU_STATIC_OFFSETS, PRESSURE_STATIC_OFFSET
 
-LOCATION_UI_URL = "http://127.0.0.1:5001/api/ingest"
+LOCATION_UI_URL = "http://91.98.145.193:5001/api/ingest"
 
 
 def loadBaseline(path: str):
