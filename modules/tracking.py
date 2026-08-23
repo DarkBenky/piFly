@@ -9,7 +9,7 @@ from temperature import BME280
 from navigation import MahonyFilter, quat_to_euler, pressure_to_altitude
 from location import IMU_STATIC_OFFSETS, PRESSURE_STATIC_OFFSET
 
-LOCATION_UI_URL = "http://91.98.145.193/api/ingest"
+LOCATION_UI_URL = "http://127.0.0.1:5001/api/ingest"
 
 
 def loadBaseline(path: str):
@@ -50,6 +50,7 @@ def track(imu_stat: IMU_STATIC_OFFSETS, pressure_stat: PRESSURE_STATIC_OFFSET,
     last_bme = 0.0
     last_post = 0.0
     last_print = 0.0
+    last_warn = 0.0
 
     print(f"Streaming attitude + altitude -> {post_url}")
     try:
@@ -87,9 +88,14 @@ def track(imu_stat: IMU_STATIC_OFFSETS, pressure_stat: PRESSURE_STATIC_OFFSET,
 
             if state is not None and now - last_post >= post_interval:
                 try:
-                    session.post(post_url, json=state, timeout=2)
+                    r = session.post(post_url, json=state, timeout=2)
+                    if r.status_code != 200 and now - last_warn >= 5.0:
+                        print(f"POST status {r.status_code}: {r.text[:80]}")
+                        last_warn = now
                 except requests.exceptions.RequestException as e:
-                    print(f"POST failed: {e}")
+                    if now - last_warn >= 5.0:
+                        print(f"POST failed: {e}")
+                        last_warn = now
                 last_post = now
 
             if state is not None and now - last_print >= 1.0:
