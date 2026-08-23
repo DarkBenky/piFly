@@ -73,6 +73,7 @@ if (webglAvailable()) {
 
     camera = new THREE.PerspectiveCamera(55, innerWidth / innerHeight, 0.1, 200);
     camera.position.set(9, 5, 9);
+    camera.up.set(0, 0, 1);
 
     renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setPixelRatio(devicePixelRatio);
@@ -85,7 +86,7 @@ if (webglAvailable()) {
 
     scene.add(new THREE.AmbientLight(0x8899aa, 0.9));
     const sun = new THREE.DirectionalLight(0xffffff, 1.0);
-    sun.position.set(8, 14, 6);
+    sun.position.set(6, 10, 16);
     scene.add(sun);
 
     scene.add(new THREE.GridHelper(60, 60, 0x333344, 0x1c1c26));
@@ -94,16 +95,16 @@ if (webglAvailable()) {
     const matBody = new THREE.MeshStandardMaterial({ color: 0x9db8d2, roughness: 0.6 });
     const matWing = new THREE.MeshStandardMaterial({ color: 0xe8a33d, roughness: 0.6 });
     const matNose = new THREE.MeshStandardMaterial({ color: 0xd8554d, roughness: 0.5 });
-    const fuselage = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.22, 1.5), matBody);
-    const wing = new THREE.Mesh(new THREE.BoxGeometry(2.4, 0.05, 0.42), matWing);
-    wing.position.z = -0.1;
-    const tail = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.05, 0.34), matWing);
-    tail.position.z = -0.62;
-    const fin = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.5, 0.34), matBody);
-    fin.position.set(0, 0.28, -0.62);
+    const fuselage = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.22, 0.32), matBody);
+    const wing = new THREE.Mesh(new THREE.BoxGeometry(0.42, 2.4, 0.05), matWing);
+    wing.position.x = -0.1;
+    const tail = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.9, 0.05), matWing);
+    tail.position.x = -0.62;
+    const fin = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.05, 0.5), matBody);
+    fin.position.set(-0.62, 0, 0.28);
     const nose = new THREE.Mesh(new THREE.ConeGeometry(0.2, 0.45, 16), matNose);
-    nose.rotation.x = Math.PI / 2;
-    nose.position.z = 0.95;
+    nose.rotation.z = -Math.PI / 2;
+    nose.position.x = 0.95;
     drone.add(fuselage, wing, tail, fin, nose);
     scene.add(drone);
 
@@ -151,8 +152,8 @@ function setTrail(history) {
   const pos = trailGeo.attributes.position.array;
   for (let i = 0; i < n; i++) {
     pos[i * 3]     = history[i].x_m || 0;
-    pos[i * 3 + 1] = history[i].alt_m || 0;
-    pos[i * 3 + 2] = history[i].y_m || 0;
+    pos[i * 3 + 1] = history[i].y_m || 0;
+    pos[i * 3 + 2] = history[i].alt_m || 0;
   }
   trailGeo.attributes.position.needsUpdate = true;
   trailGeo.setDrawRange(0, n);
@@ -160,7 +161,7 @@ function setTrail(history) {
 
 function update3D(latest) {
   drone.quaternion.set(latest.qx, latest.qy, latest.qz, latest.qw);
-  drone.position.set(latest.x_m || 0, latest.alt_m || 0, latest.y_m || 0);
+  drone.position.set(latest.x_m || 0, latest.y_m || 0, latest.alt_m || 0);
   offsetGeo.setFromPoints([new THREE.Vector3(0, 0, 0), drone.position.clone()]);
   offsetGeo.attributes.position.needsUpdate = true;
   offsetLine.computeLineDistances();
@@ -185,8 +186,8 @@ function drawFallback() {
 
   ctx.save();
   ctx.translate(cx, cy);
-  ctx.rotate(-S.roll * Math.PI / 180);
-  const hy = S.pitch * k;
+  ctx.rotate(S.roll * Math.PI / 180);
+  const hy = -S.pitch * k;
   ctx.fillStyle = '#5c4430';
   ctx.fillRect(-R * 2, hy, R * 4, R * 2);
   ctx.strokeStyle = '#fff';
