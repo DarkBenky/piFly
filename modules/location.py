@@ -3,11 +3,12 @@ from temperature import BME280
 from dataclasses import dataclass
 from pprint import pprint
 import numpy
+import math
 import time
 import json
 import os
 
-BASELINE_SAMPLES = 1_000
+BASELINE_SAMPLES = 5_000
 LOGS_DIR = os.path.join(os.path.dirname(__file__), "..", "logs")
 
 @dataclass
@@ -77,6 +78,54 @@ class PRESSURE_STATIC_OFFSET:
         self.temperature = temperature
         self.stdTemperature = stdTemperature
 
+class CalibrationError(Exception):
+    pass
+
+
+def validateIMUBaseline(stat: IMU_STATIC_OFFSETS) -> IMU_STATIC_OFFSETS:
+    means = {
+        "xAcceleration": stat.xAcceleration, "yAcceleration": stat.yAcceleration,
+        "zAcceleration": stat.zAcceleration,
+        "xGyro": stat.xGyro, "yGyro": stat.yGyro, "zGyro": stat.zGyro,
+        "xMagneto": stat.xMagneto, "yMagneto": stat.yMagneto, "zMagneto": stat.zMagneto,
+    }
+    stds = {
+        "xStdAcc": stat.xStdAcc, "yStdAcc": stat.yStdAcc, "zStdAcc": stat.zStdAcc,
+        "xStdGyro": stat.xStdGyro, "yStdGyro": stat.yStdGyro, "zStdGyro": stat.zStdGyro,
+        "xStdMag": stat.xStdMag, "yStdMag": stat.yStdMag, "zStdMag": stat.zStdMag,
+    }
+
+    for name, v in {**means, **stds}.items():
+        if not math.isfinite(v):
+            raise CalibrationError(f"{name} is not finite ({v!r})")
+
+    for name, v in stds.items():
+        if v < 0.0:
+            raise CalibrationError(f"{name} is negative ({v:.4g}); std cannot be < 0")
+
+    for name in ("xGyro", "yGyro", "zGyro"):
+        if abs(means[name]) > 5.0:
+            raise CalibrationError(
+                f"{name} mean is {means[name]:.3f} rad/s -- looks like an "
+                "accel/gravity value in a gyro slot (swapped columns?)"
+            )
+
+    for name in ("xStdGyro", "yStdGyro", "zStdGyro"):
+        if stds[name] > 0.5:
+            raise CalibrationError(
+                f"{name} is {stds[name]:.3f} rad/s -- device was likely moving "
+                "during calibration"
+            )
+    for name in ("xStdAcc", "yStdAcc", "zStdAcc"):
+        if stds[name] > 1.0:
+            raise CalibrationError(
+                f"{name} is {stds[name]:.3f} m/s^2 -- device was likely moving "
+                "during calibration"
+            )
+
+    return stat
+
+
 def getBaselineIMU(samples: int, imu: IMU) -> IMU_STATIC_OFFSETS:
     readings = []
     for i in range(samples):
@@ -86,7 +135,7 @@ def getBaselineIMU(samples: int, imu: IMU) -> IMU_STATIC_OFFSETS:
             print(f"iter: {i} / {samples}")
             pprint(readings[-1])
 
-    return IMU_STATIC_OFFSETS(
+    stat = IMU_STATIC_OFFSETS(
         numpy.mean([r.xAcceleration for r in readings]),
         numpy.mean([r.yAcceleration for r in readings]),
         numpy.mean([r.zAcceleration for r in readings]),
@@ -107,6 +156,10 @@ def getBaselineIMU(samples: int, imu: IMU) -> IMU_STATIC_OFFSETS:
         numpy.std([r.yMagneto for r in readings]),
         numpy.std([r.zMagneto for r in readings])
     )
+
+    validateIMUBaseline(stat)
+    return stat
+
 
 def getBaselinePressure(samples: int, bme: BME280) -> PRESSURE_STATIC_OFFSET:
     readings = []

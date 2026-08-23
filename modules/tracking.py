@@ -3,7 +3,7 @@ import time
 
 import requests
 
-from location import IMU_STATIC_OFFSETS, PRESSURE_STATIC_OFFSET
+from location import IMU_STATIC_OFFSETS, PRESSURE_STATIC_OFFSET, validateIMUBaseline
 from position import Position
 
 LOCATION_UI_URL = "http://91.98.145.193:5001/api/ingest"
@@ -22,6 +22,7 @@ def loadBaseline(path: str):
         imu_d["xStdGyro"], imu_d["yStdGyro"], imu_d["zStdGyro"],
         imu_d["xStdMag"], imu_d["yStdMag"], imu_d["zStdMag"],
     )
+    validateIMUBaseline(imu)
     pres = PRESSURE_STATIC_OFFSET(
         pres_d.get("pressure", 1013.25),
         pres_d.get("stdPressure", 0.0),

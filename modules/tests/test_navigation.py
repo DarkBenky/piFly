@@ -170,6 +170,24 @@ class TestMahonyFilter(unittest.TestCase):
             f.update(0.5, 0.5, 0.5, 0, 0, 9.80665, 20, 0, 40, 0.01)
         self.assertAlmostEqual(f.q[0], 1.0, places=2)
 
+    def test_default_ki_enabled(self):
+        f = nav.MahonyFilter(_Stat())
+        self.assertGreater(f.ki, 0.0)
+
+    def test_integral_clamped(self):
+        f = nav.MahonyFilter(_Stat(), kp=0.0, ki=1.0)
+        for _ in range(5000):
+            f.update(0, 0, 0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.02)
+        for e in f.e_int:
+            self.assertLessEqual(abs(e), f._int_limit + 1e-9)
+
+    def test_stable_with_ki(self):
+        f = nav.MahonyFilter(_Stat())
+        for _ in range(1000):
+            f.update(0.02, -0.01, 0.03, 0.1, -0.1, 9.7, 21, 1, 39, 0.01)
+        self.assertTrue(all(math.isfinite(c) for c in f.q))
+        self.assertAlmostEqual(_norm(f.q), 1.0, places=6)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

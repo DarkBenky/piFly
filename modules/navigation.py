@@ -2,11 +2,12 @@ import math
 
 
 class MahonyFilter:
-    def __init__(self, stat, kp: float = 0.5, ki: float = 0.0):
+    def __init__(self, stat, kp: float = 0.5, ki: float = 0.05):
         self.q = [1.0, 0.0, 0.0, 0.0]                       # w, x, y, z
         self.b_gyro = [stat.xGyro, stat.yGyro, stat.zGyro]  # static gyro bias
         self.kp, self.ki = kp, ki
         self.e_int = [0.0, 0.0, 0.0]
+        self._int_limit = 0.5
 
     def update(self, gx, gy, gz, ax, ay, az, mx, my, mz, dt):
         q0, q1, q2, q3 = self.q
@@ -39,7 +40,11 @@ class MahonyFilter:
 
         # combined error -> integral term -> bias/PI-corrected gyro rates
         ex, ey, ez = exa + exm, eya + eym, eza + ezm
-        self.e_int = [e_i + e * dt for e_i, e in zip(self.e_int, (ex, ey, ez))]
+        if self.ki > 0.0:
+            self.e_int = [
+                max(-self._int_limit, min(self._int_limit, e_i + e * dt))
+                for e_i, e in zip(self.e_int, (ex, ey, ez))
+            ]
         gxc = gx - self.b_gyro[0] + self.kp * ex + self.ki * self.e_int[0]
         gyc = gy - self.b_gyro[1] + self.kp * ey + self.ki * self.e_int[1]
         gzc = gz - self.b_gyro[2] + self.kp * ez + self.ki * self.e_int[2]
