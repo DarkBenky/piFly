@@ -7,6 +7,8 @@ import time
 
 BASELINE_SAMPLES = 1_000
 
+
+@dataclass
 class IMU_STATIC_OFFSETS:
     xAcceleration: float
     xStdAcc: float
@@ -59,6 +61,7 @@ class IMU_STATIC_OFFSETS:
         self.zStdMag = zStdMag
 
 
+@dataclass
 class PRESSURE_STATIC_OFFSET:
     pressure: float
     stdPressure: float
