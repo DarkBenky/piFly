@@ -46,6 +46,7 @@ def track(imu_stat: IMU_STATIC_OFFSETS, pressure_stat: PRESSURE_STATIC_OFFSET,
 
     session = requests.Session()
     state = None
+    alt_smooth = None
     t_prev = time.monotonic()
     last_bme = 0.0
     last_post = 0.0
@@ -74,16 +75,23 @@ def track(imu_stat: IMU_STATIC_OFFSETS, pressure_stat: PRESSURE_STATIC_OFFSET,
 
             if now - last_bme >= 0.5:
                 b = bme.get_record()
-                state = {
-                    "timestamp": time.time(),
-                    "roll": roll, "pitch": pitch, "yaw": yaw,
-                    "qw": filt.q[0], "qx": filt.q[1], "qy": filt.q[2], "qz": filt.q[3],
-                    "x_m": 0.0, "y_m": 0.0,
-                    "alt_m": pressure_to_altitude(b["bme_pressure_hpa"], pressure_stat.pressure,
-                                                  temp_c=b["bme_temp_c"]),
-                    "pressure_hpa": b["bme_pressure_hpa"],
-                    "temp_c": b["bme_temp_c"],
-                }
+                p = b["bme_pressure_hpa"]
+                if 300.0 < p < 1100.0:
+                    alt_raw = pressure_to_altitude(p, pressure_stat.pressure,
+                                                   temp_c=b["bme_temp_c"])
+                    if alt_smooth is None:
+                        alt_smooth = alt_raw
+                    elif abs(alt_raw - alt_smooth) < 5.0:
+                        alt_smooth += 0.15 * (alt_raw - alt_smooth)
+                    state = {
+                        "timestamp": time.time(),
+                        "roll": roll, "pitch": pitch, "yaw": yaw,
+                        "qw": filt.q[0], "qx": filt.q[1], "qy": filt.q[2], "qz": filt.q[3],
+                        "x_m": 0.0, "y_m": 0.0,
+                        "alt_m": alt_smooth,
+                        "pressure_hpa": p,
+                        "temp_c": b["bme_temp_c"],
+                    }
                 last_bme = now
 
             if state is not None and now - last_post >= post_interval:
