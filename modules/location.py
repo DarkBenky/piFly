@@ -5,9 +5,10 @@ from pprint import pprint
 import numpy
 import time
 import json
+import os
 
 BASELINE_SAMPLES = 1_000
-
+LOGS_DIR = os.path.join(os.path.dirname(__file__), "..", "logs")
 
 @dataclass
 class IMU_STATIC_OFFSETS:
@@ -118,11 +119,14 @@ if __name__ == "__main__":
     pprint(IMU_STATIC)
     pprint(PRESSURE_STATIC)
 
-    with open(f"./logs/baseline_{time.time()}.json", "w") as f:
+    os.makedirs(LOGS_DIR, exist_ok=True)
+    path = os.path.join(LOGS_DIR, f"baseline_{time.time()}.json")
+    with open(path, "w") as f:
         f.write(json.dumps({
             "imu": IMU_STATIC.__dict__,
             "pressure": PRESSURE_STATIC.__dict__
         }))
+    print(f"Saved -> {path}")
 
     
     
