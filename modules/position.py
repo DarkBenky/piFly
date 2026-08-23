@@ -106,6 +106,9 @@ class Position:
         return self.update()
 
     def getPosDir(self) -> PosDir:
+        # Advances the filter -- do not also call getPosition()/update() in
+        # the same tick. If you need both the raw state and PosDir, call
+        # getPosition() once and pass its result to stateToPosDir().
         return stateToPosDir(self.update())
 
 
@@ -122,7 +125,7 @@ if __name__ == "__main__":
     try:
         while True:
             state = pos.getPosition()
-            pd = pos.getPosDir()
+            pd = stateToPosDir(state)
             print(f"roll {state['roll']:7.1f}  pitch {state['pitch']:7.1f}  yaw {state['yaw']:7.1f}  |  "
                   f"pos ({pd.x:+.1f}, {pd.y:+.1f}, {pd.z:+.1f})  "
                   f"dir ({pd.dx:+.2f}, {pd.dy:+.2f}, {pd.dz:+.2f})")

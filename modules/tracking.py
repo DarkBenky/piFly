@@ -1,5 +1,4 @@
 import json
-import os
 import time
 
 import requests
@@ -45,6 +44,11 @@ def track(imu_stat: IMU_STATIC_OFFSETS, pressure_stat: PRESSURE_STATIC_OFFSET,
         while True:
             state = pos.getPosition()
             now = time.monotonic()
+
+            if state["pressure_hpa"] <= 0.0:
+                # no valid BME280 reading yet -- don't post placeholder zeros
+                time.sleep(0.005)
+                continue
 
             if now - last_post >= post_interval:
                 try:
