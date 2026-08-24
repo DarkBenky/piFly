@@ -15,8 +15,8 @@ class MahonyFilter:
         # normalize accel + mag
         na = math.sqrt(ax * ax + ay * ay + az * az) or 1.0
         ax, ay, az = ax / na, ay / na, az / na
-        nm = math.sqrt(mx * mx + my * my + mz * mz) or 1.0
-        mx, my, mz = mx / nm, my / nm, mz / nm
+        nm = math.sqrt(mx * mx + my * my + mz * mz)
+        mx, my, mz = (mx / nm, my / nm, mz / nm) if nm >= 10.0 else (0.0, 0.0, 0.0)
 
         # estimated gravity direction from current quaternion
         vx = 2 * (q1 * q3 - q0 * q2)

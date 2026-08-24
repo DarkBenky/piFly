@@ -188,6 +188,13 @@ class TestMahonyFilter(unittest.TestCase):
         self.assertTrue(all(math.isfinite(c) for c in f.q))
         self.assertAlmostEqual(_norm(f.q), 1.0, places=6)
 
+    def test_tiny_mag_field_ignored(self):
+        f = nav.MahonyFilter(_Stat())
+        for _ in range(200):
+            f.update(0, 0, 0, 0, 0, 9.80665, 0.5, -0.3, 0.4, 0.01)
+        self.assertAlmostEqual(f.q[0], 1.0, places=3)
+        self.assertAlmostEqual(_norm(f.q), 1.0, places=6)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -32,7 +32,7 @@ class Position:
     def __init__(self, imu_stat: IMU_STATIC_OFFSETS, pressure_stat: PRESSURE_STATIC_OFFSET,
                  imu: IMU = None, bme: BME280 = None,
                  alt_smoothing: float = 0.15, bme_interval: float = 0.5,
-                 still_accel: float = 0.05, still_ticks: int = 20):
+                 still_accel: float = 0.15, still_ticks: int = 20):
         self.imu_stat = imu_stat
         self.pressure_stat = pressure_stat
         self.imu = imu if imu is not None else IMU()
@@ -45,7 +45,6 @@ class Position:
         self.filt = MahonyFilter(imu_stat)
         self.acc_bias = (imu_stat.xAcceleration, imu_stat.yAcceleration,
                          imu_stat.zAcceleration - 9.80665)
-        self.mag_bias = (imu_stat.xMagneto, imu_stat.yMagneto, imu_stat.zMagneto)
 
         self.q_dr = [1.0, 0.0, 0.0, 0.0]
         self.px = 0.0
@@ -92,9 +91,9 @@ class Position:
         self.filt.update(
             rec.xGyro, rec.yGyro, rec.zGyro,
             ax_c, ay_c, az_c,
-            rec.xMagneto - self.mag_bias[0],
-            rec.yMagneto - self.mag_bias[1],
-            rec.zMagneto - self.mag_bias[2],
+            rec.xMagneto,
+            rec.yMagneto,
+            rec.zMagneto,
             dt,
         )
         roll, pitch, yaw = quat_to_euler(self.filt.q)
