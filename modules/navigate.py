@@ -18,7 +18,6 @@ from dataclasses import dataclass, asdict
 
 BAROMETRIC_M_PER_HPA = 8.43
 EARTH_RADIUS_M = 6371000.0
-GRAVITY_M_S2 = 9.81   # subtracted from measured accel; assumes a level platform
 
 @dataclass
 class Position:
@@ -99,9 +98,11 @@ class Model:
         self._H_gps[0, 0] = self._H_gps[1, 1] = self._H_gps[2, 2] = 1.0
         self.ekf.H = self._H_gps.copy()
 
-        self.origin_lat = self.basePosition.latitude
-        self.origin_lon = self.basePosition.longitude
-        self.origin_alt = self.basePosition.altitude
+        self._origin_set = self.basePosition is not None
+        if self._origin_set:
+            self.origin_lat = self.basePosition.latitude
+            self.origin_lon = self.basePosition.longitude
+            self.origin_alt = self.basePosition.altitude
 
         self.last_predict_t = None
         self.initialized = False
@@ -124,7 +125,7 @@ class Model:
             longitudes.append(lon)
 
         if not latitudes:
-            raise RuntimeError("No GPS fix available for base position")
+            return None
 
         return Position(
             latitude = sum(latitudes) / len(latitudes),
@@ -207,13 +208,19 @@ class Model:
     def predictStep(self, dt: float, event: SensorEvent):
         data = event.data
 
-        # specific force in the local frame; subtract gravity (assumes a level
-        # platform -- a real INS would rotate by the current attitude)
+        # specific force in the local frame; subtract the gravity vector that
+        # the stationary baseline captured (assumes a level platform -- a real
+        # INS would rotate gravity by the current attitude)
+        gravity = np.array([
+            self.imu_stat.xAcceleration,
+            self.imu_stat.yAcceleration,
+            self.imu_stat.zAcceleration,
+        ])
         a = np.array([
             data.xAcceleration,
             data.yAcceleration,
             data.zAcceleration,
-        ]) - np.array([0.0, 0.0, GRAVITY_M_S2])
+        ]) - gravity
         a -= self.ekf.x[6:9]  # remove estimated accelerometer bias
 
         # F: p += v*dt - 0.5*b_a*dt^2 ; v += -b_a*dt   (bias random-walks)
@@ -235,6 +242,13 @@ class Model:
         alt = gps_data.get("alt_m")
         if lat is None or lon is None or alt is None:
             return
+
+        # first valid fix becomes the local origin if we never found one
+        if not self._origin_set:
+            self.origin_lat = lat
+            self.origin_lon = lon
+            self.origin_alt = alt
+            self._origin_set = True
 
         east, north, up = self._geodetic_to_enu(lat, lon, alt)
         z = np.array([east, north, up])
