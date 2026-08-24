@@ -215,7 +215,6 @@ IMU_STATIC = None
 PRESSURE_STATIC = None
 
 if __name__ == "__main__":
-    from tracking import track
 
     imu = IMU()
     bme = BME280()
@@ -234,8 +233,6 @@ if __name__ == "__main__":
             "pressure": PRESSURE_STATIC.__dict__
         }))
     print(f"Saved -> {path}")
-
-    track(IMU_STATIC, PRESSURE_STATIC)
 
     
     
