@@ -2,7 +2,7 @@ import sys
 import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
-from modules.temperature import BME280
+from modules.temperature import SensorUnavailable, open_bme280
 import requests
 import time
 
@@ -14,7 +14,10 @@ SMOOTHING = 0.4  # blend 40% new value, 60% previous value
 
 if __name__ == "__main__":
     print(f"Target server: {SERVER_URL}")
-    sensor = BME280()
+    sensor = open_bme280()
+    if sensor is None:
+        print("No BME280 detected -- check the sensor wiring/power. Exiting.")
+        raise SystemExit(1)
     prev_rec = None
 
     while True:

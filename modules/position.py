@@ -3,7 +3,7 @@ import time
 from dataclasses import dataclass
 
 from imu import IMU
-from temperature import BME280
+from temperature import BME280, SensorUnavailable, open_bme280
 from navigation import MahonyFilter, quat_to_euler, pressure_to_altitude, rotate_vector, integrate_gyro
 from location import IMU_STATIC_OFFSETS, PRESSURE_STATIC_OFFSET
 
@@ -28,15 +28,20 @@ def stateToPosDir(state: dict) -> PosDir:
     return PosDir(state["x_m"], state["y_m"], state["z_m"], *fwd, *up)
 
 
+_BME_UNSET = object()
+
+
 class Position:
     def __init__(self, imu_stat: IMU_STATIC_OFFSETS, pressure_stat: PRESSURE_STATIC_OFFSET,
-                 imu: IMU = None, bme: BME280 = None,
+                 imu: IMU = None, bme: BME280 = _BME_UNSET,
                  alt_smoothing: float = 0.15, bme_interval: float = 0.5,
                  still_accel: float = 0.15, still_ticks: int = 20):
         self.imu_stat = imu_stat
         self.pressure_stat = pressure_stat
         self.imu = imu if imu is not None else IMU()
-        self.bme = bme if bme is not None else BME280()
+        # bme=None explicitly means "run without a barometer"; leaving it unset
+        # tries to open one and degrades gracefully when the sensor is missing.
+        self.bme = open_bme280(quiet=True) if bme is _BME_UNSET else bme
         self.alt_smoothing = alt_smoothing
         self.bme_interval = bme_interval
         self.still_accel = still_accel
@@ -124,18 +129,25 @@ class Position:
             self.py += self.vy * dt
             self.pz += self.vz * dt
 
-        if self._last_bme is None or now - self._last_bme >= self.bme_interval:
-            b = self.bme.get_record()
-            p = b["bme_pressure_hpa"]
-            if 300.0 < p < 1100.0:
-                alt_raw = pressure_to_altitude(p, self.pressure_stat.pressure,
-                                               temp_c=b["bme_temp_c"])
-                if self._alt is None:
-                    self._alt = alt_raw
-                elif abs(alt_raw - self._alt) < 5.0:
-                    self._alt += self.alt_smoothing * (alt_raw - self._alt)
-                self._bme = b
+        if (self.bme is not None and self.pressure_stat is not None
+                and (self._last_bme is None or now - self._last_bme >= self.bme_interval)):
             self._last_bme = now
+            try:
+                b = self.bme.get_record()
+            except SensorUnavailable as exc:
+                # drop the barometer and keep dead-reckoning on the IMU
+                print(f"[position] barometer unavailable, continuing without it: {exc}")
+                self.bme = None
+            else:
+                p = b["bme_pressure_hpa"]
+                if 300.0 < p < 1100.0:
+                    alt_raw = pressure_to_altitude(p, self.pressure_stat.pressure,
+                                                   temp_c=b["bme_temp_c"])
+                    if self._alt is None:
+                        self._alt = alt_raw
+                    elif abs(alt_raw - self._alt) < 5.0:
+                        self._alt += self.alt_smoothing * (alt_raw - self._alt)
+                    self._bme = b
 
         q = self.filt.q
         alt = self._alt if self._alt is not None else 0.0
@@ -166,9 +178,11 @@ if __name__ == "__main__":
     from location import getBaselineIMU, getBaselinePressure, BASELINE_SAMPLES
 
     imu = IMU()
-    bme = BME280()
+    bme = open_bme280()
+    if bme is None:
+        print("[position] no barometer: altitude stays at 0 (IMU dead reckoning only)")
 
-    pressure_stat = getBaselinePressure(BASELINE_SAMPLES, bme)
+    pressure_stat = getBaselinePressure(BASELINE_SAMPLES, bme) if bme else None
     imu_stat = getBaselineIMU(BASELINE_SAMPLES, imu)
 
     pos = Position(imu_stat, pressure_stat, imu, bme)

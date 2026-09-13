@@ -1,6 +1,6 @@
 from location import getBaselinePressure, getBaselineIMU
 
-from temperature import BME280
+from temperature import BME280, SensorUnavailable, open_bme280
 from imu import IMU
 from gps import GPS
 
@@ -49,7 +49,7 @@ class Model:
         self.event_queue = asyncio.Queue()
 
         self.imu_stat = getBaselineIMU(5_000, imu)
-        self.pressure_stat = getBaselinePressure(5_000, bme)
+        self.pressure_stat = getBaselinePressure(5_000, bme) if bme is not None else None
 
         n_states = 12
         self.state_vector = np.zeros(n_states)
@@ -81,8 +81,12 @@ class Model:
 
         # R_baro: convert pressure std (hPa) to altitude std (m) via barometric
         # formula sensitivity, then square for variance
-        alt_std = self.pressure_stat.stdPressure * BAROMETRIC_M_PER_HPA  # see note below
-        self.R_baro = np.array([[alt_std ** 2]])
+        if self.pressure_stat is not None:
+            alt_std = self.pressure_stat.stdPressure * BAROMETRIC_M_PER_HPA  # see note below
+            self.R_baro = np.array([[alt_std ** 2]])
+        else:
+            # no barometer: z is left to GPS (baroUpdate() becomes a no-op)
+            self.R_baro = np.array([[1e6]])
 
         # 12-state EKF: position(3), velocity(3), accel bias(3), gyro bias(3).
         # Measurement vector is always 3-D (local position); GPS drives all three
@@ -155,9 +159,16 @@ class Model:
             await asyncio.sleep(period)
 
     async def _bme_loop(self, log=False):
+        if self.bme is None:
+            return
         period = 1.0 / self.bme_tps
         while True:
-            reading = self.bme.get_record()
+            try:
+                reading = self.bme.get_record()
+            except SensorUnavailable as exc:
+                print(f"[nav] barometer lost, continuing on IMU + GPS only: {exc}")
+                self.bme = None
+                return
             await self.event_queue.put(SensorEvent(time.monotonic(), "bme", reading))
             if log:
                 self._log(reading, "./logs/baro.json")
@@ -255,6 +266,8 @@ class Model:
         self.ekf.update(z, self.R_gps, self._H_gps)
 
     def baroUpdate(self, bme_data: dict):
+        if self.pressure_stat is None:
+            return
         # local altitude relative to the base pressure (positive up)
         alt_local = (self.pressure_stat.pressure - bme_data["bme_pressure_hpa"]) * BAROMETRIC_M_PER_HPA
 
@@ -288,5 +301,8 @@ class Model:
         await asyncio.gather(*tasks)
 
 if __name__ == "__main__":
-    model = Model(IMU(), BME280(), GPS())
+    bme = open_bme280()
+    if bme is None:
+        print("[nav] no barometer detected - navigation runs on IMU + GPS (z from GPS)")
+    model = Model(IMU(), bme, GPS())
     asyncio.run(model.run())

@@ -1,5 +1,5 @@
 from imu import IMU, IMU_OUT
-from temperature import BME280
+from temperature import BME280, SensorUnavailable, open_bme280
 from dataclasses import dataclass
 from pprint import pprint
 import numpy
@@ -217,9 +217,12 @@ PRESSURE_STATIC = None
 if __name__ == "__main__":
 
     imu = IMU()
-    bme = BME280()
+    bme = open_bme280()
+    if bme is None:
+        print("[location] no barometer: pressure baseline skipped -- "
+              "navigation still runs on IMU + GPS")
 
-    PRESSURE_STATIC = getBaselinePressure(BASELINE_SAMPLES, bme)
+    PRESSURE_STATIC = getBaselinePressure(BASELINE_SAMPLES, bme) if bme else None
     IMU_STATIC = getBaselineIMU(BASELINE_SAMPLES, imu)
 
     pprint(IMU_STATIC)
@@ -230,7 +233,7 @@ if __name__ == "__main__":
     with open(path, "w") as f:
         f.write(json.dumps({
             "imu": IMU_STATIC.__dict__,
-            "pressure": PRESSURE_STATIC.__dict__
+            "pressure": PRESSURE_STATIC.__dict__ if PRESSURE_STATIC else None
         }))
     print(f"Saved -> {path}")
 
