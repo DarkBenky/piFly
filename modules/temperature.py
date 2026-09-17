@@ -12,8 +12,10 @@ class SensorUnavailable(RuntimeError):
 
 # Buses probed in order.  i2c-5 lives on GPIO10/11 (physical pins 19/23) and is
 # enabled with:   dtparam=spi=off  +  dtoverlay=i2c5,pins_10_11
+# i2c-0 is the HAT-ID bus: GPIO0/GPIO1 = physical pins 27/28.
 I2C_BUSES = (
     (5, "i2c-5 (SDA=GPIO10/pin19, SCL=GPIO11/pin23)"),
+    (0, "i2c-0 (SDA=GPIO0/pin27, SCL=GPIO1/pin28, HAT-ID pins)"),
     (1, "i2c-1 (SDA=GPIO2/pin3, SCL=GPIO3/pin5)"),
 )
 I2C_ADDRESSES = (0x77, 0x76)   # 0x77 = Adafruit default, 0x76 = ADDR jumper closed
@@ -63,9 +65,9 @@ LOG_FILE = os.path.join(os.path.dirname(__file__), "..", "logs", "temperature.lo
 class BME280:
     """BME280 temperature / pressure / humidity sensor.
 
-    Probes I2C bus 5, then bus 1 (addresses 0x77 and 0x76), then finally the
-    legacy SPI wiring on GPIO5.  Reads are retried, and the device is
-    re-detected once in case it was power-cycled underneath us.
+    Probes I2C bus 5, bus 0 (HAT-ID pins 27/28), then bus 1 (addresses 0x77 and
+    0x76), then finally the legacy SPI wiring on GPIO5.  Reads are retried, and
+    the device is re-detected once in case it was power-cycled underneath us.
     """
 
     def __init__(self, retries: int = 3, retry_delay: float = 0.25,
@@ -171,6 +173,60 @@ class BME280:
     def close(self) -> None:
         self.bme280 = None
 
+    # -- diagnostics --------------------------------------------------------
+    def health_check(self, seconds: float = 30.0, period: float = 0.05,
+                     verbose: bool = True) -> dict:
+        """Hammer the sensor and report connection quality.
+
+        Use this to tell a solid contact apart from a marginal one:
+        `python temperature.py --check`
+        """
+        start = time.time()
+        samples = ok = transitions = 0
+        present = None
+        longest_gap = 0.0
+        last_ok = None
+        while time.time() - start < seconds:
+            alive = self._try_read() is not None
+            samples += 1
+            if alive:
+                ok += 1
+                if last_ok is not None:
+                    longest_gap = max(longest_gap, time.time() - last_ok)
+                last_ok = time.time()
+            if present is None:
+                present = alive
+            elif alive != present:
+                present = alive
+                transitions += 1
+                if verbose:
+                    print(f"[{time.time() - start:6.1f}s] sensor "
+                          f"{'came back' if alive else 'dropped out'}")
+            time.sleep(period)
+
+        success = 100.0 * ok / samples if samples else 0.0
+        summary = {
+            "backend": self.backend,
+            "samples": samples,
+            "ok": ok,
+            "success_pct": success,
+            "transitions": transitions,
+            "longest_gap_s": longest_gap,
+        }
+        if verbose:
+            print(f"\n{self.backend}")
+            print(f"  {ok}/{samples} reads OK  ({success:.1f}%)  over {seconds:.0f}s")
+            print(f"  dropouts/returns: {transitions}")
+            if success >= 99.0:
+                print("  verdict: connection looks SOLID")
+            elif success >= 50.0:
+                print("  verdict: connection is MARGINAL -- reseat VIN/GND/SDA/SCL "
+                      "and try another jumper on the worst wire")
+            else:
+                print("  verdict: connection is BROKEN most of the time -- check "
+                      "wiring, then re-run")
+        return summary
+
 
 def open_bme280(retries: int = 2, retry_delay: float = 0.25,
                 quiet: bool = False) -> "BME280 | None":
@@ -187,7 +243,35 @@ def open_bme280(retries: int = 2, retry_delay: float = 0.25,
         return None
 
 
+def _parse_args(argv):
+    """--check runs a connection health test; --interval sets the logging period."""
+    opts = {"check": False, "seconds": 30.0, "interval": 60.0}
+    for i, arg in enumerate(argv):
+        if arg == "--check":
+            opts["check"] = True
+        elif arg == "--seconds" and i + 1 < len(argv):
+            opts["seconds"] = float(argv[i + 1])
+        elif arg == "--interval" and i + 1 < len(argv):
+            opts["interval"] = float(argv[i + 1])
+    return opts
+
+
 if __name__ == "__main__":
+    import sys
+
+    opts = _parse_args(sys.argv[1:])
+
+    if opts["check"]:
+        print(f"BME280 connection health check -- {opts['seconds']:.0f}s of "
+              "continuous reads\n")
+        sensor = open_bme280()
+        if sensor is None:
+            print("sensor NOT detected on any bus.")
+            print("wiring: VIN=pin17 (3V3), GND=pin20, SDA=pin27, SCL=pin28")
+            raise SystemExit(2)
+        summary = sensor.health_check(seconds=opts["seconds"])
+        raise SystemExit(0 if summary["success_pct"] >= 99.0 else 1)
+
     os.makedirs(os.path.dirname(LOG_FILE), exist_ok=True)
     if not os.path.exists(LOG_FILE):
         with open(LOG_FILE, "w") as f:
@@ -197,20 +281,33 @@ if __name__ == "__main__":
     if sensor is not None:
         print(f"[temperature] BME280 detected on {sensor.backend}")
 
+    reads_ok = 0
+    reads_failed = 0
+    failures_in_a_row = 0
+
     while True:
         if sensor is None:
             print(f"BME280 => not detected  |  CPU => {cpu_temp():.1f}°C"
                   "  (no sensor row logged; still looking for it)")
-            time.sleep(60)
+            time.sleep(opts["interval"])
             sensor = open_bme280(quiet=True)   # pick it up when it appears
             continue
 
         try:
             rec = sensor.get_record()
         except SensorUnavailable as exc:
-            print(f"[temperature] {exc}")
-            sensor = None
+            reads_failed += 1
+            failures_in_a_row += 1
+            print(f"[temperature] read failed (#{failures_in_a_row} in a row): {exc}")
+            if failures_in_a_row >= 3:
+                print("[temperature] connection looks broken -- check VIN(17)/GND(20)/"
+                      "SDA(27)/SCL(28), then run: python temperature.py --check")
+                sensor = None
+            time.sleep(opts["interval"])
             continue
+
+        failures_in_a_row = 0
+        reads_ok += 1
 
         print(
             f"BME280 => {rec['bme_temp_c']:.1f}°C  "
@@ -226,4 +323,9 @@ if __name__ == "__main__":
                 f"{rec['cpu_temp_c']}\n"
             )
 
-        time.sleep(60)
+        total = reads_ok + reads_failed
+        if total % 10 == 0:
+            print(f"[temperature] connection health: {reads_ok}/{total} reads OK "
+                  f"({100.0 * reads_ok / total:.1f}%)")
+
+        time.sleep(opts["interval"])
