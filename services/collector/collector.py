@@ -104,6 +104,7 @@ class Collector:
         self.stopped = None
         self.accepting = True
         self.rates_at_stop = {}
+        self.buffer_lock = threading.Lock()
         self.reader = None
         self.bme = None
         self.gps = None
@@ -118,7 +119,13 @@ class Collector:
             self.files[name] = open(os.path.join(self.dir, name), mode)
 
     def write(self, name, payload):
-        self.buffers[name].append(payload)
+        with self.buffer_lock:
+            self.buffers[name].append(payload)
+
+    def take(self, name):
+        with self.buffer_lock:
+            items, self.buffers[name] = self.buffers[name], []
+        return items
 
     def flush(self):
         now = time.time()
@@ -126,34 +133,29 @@ class Collector:
             return
         self.last_flush = now
         for name in ("imu", "mag"):
-            items = self.buffers[name]
+            items = self.take(name)
             if items:
-                handle = self.files[f"{name}.bin"]
-                handle.write(b"".join(items))
-                items.clear()
+                self.files[f"{name}.bin"].write(b"".join(items))
         for name in ("gps", "bme", "marks", "fusion"):
-            items = self.buffers[name]
+            items = self.take(name)
             if items:
                 handle = self.files[f"{name}.jsonl"]
                 for item in items:
                     handle.write(json.dumps(item) + "\n")
-                items.clear()
         for handle in self.files.values():
             handle.flush()
 
     def close_files(self, extra):
         for name in ("imu", "mag"):
-            items = self.buffers[name]
+            items = self.take(name)
             if items:
                 self.files[f"{name}.bin"].write(b"".join(items))
-                items.clear()
         for name in ("gps", "bme", "marks", "fusion"):
-            items = self.buffers[name]
+            items = self.take(name)
             if items:
                 handle = self.files[f"{name}.jsonl"]
                 for item in items:
                     handle.write(json.dumps(item) + "\n")
-                items.clear()
         meta = dict(extra)
         meta.update({
             "schema": SCHEMA_VERSION,
