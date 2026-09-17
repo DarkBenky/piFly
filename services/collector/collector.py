@@ -102,6 +102,7 @@ class Collector:
         self.marks = []
         self.started = time.time()
         self.stopped = None
+        self.accepting = True
         self.rates_at_stop = {}
         self.reader = None
         self.bme = None
@@ -183,7 +184,7 @@ class Collector:
             handle.close()
 
     def push(self, name, item, payload):
-        if self.stop.is_set():
+        if not self.accepting:
             return
         try:
             self.queues[name].put_nowait(item)
@@ -384,6 +385,7 @@ class Collector:
             pass
         finally:
             self.stopped = time.time()
+            self.accepting = False
             self.stop.set()
             self.rates_at_stop = {k: round(v.rate(), 2) for k, v in self.rates.items()}
             if self.gps is not None:
