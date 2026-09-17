@@ -101,6 +101,8 @@ class Collector:
         self.last = {"gps": None, "bme": None, "imu": None}
         self.marks = []
         self.started = time.time()
+        self.stopped = None
+        self.rates_at_stop = {}
         self.reader = None
         self.bme = None
         self.gps = None
@@ -159,8 +161,9 @@ class Collector:
             "name": self.args.name,
             "note": self.args.note,
             "started": self.started,
-            "ended": time.time(),
-            "duration_s": round(time.time() - self.started, 3),
+            "ended": self.stopped or time.time(),
+            "duration_s": round((self.stopped or time.time()) - self.started, 3),
+            "teardown_s": round(time.time() - (self.stopped or time.time()), 3),
             "git_commit": git_commit(),
             "host": socket.gethostname(),
             "kernel": platform.release(),
@@ -169,6 +172,8 @@ class Collector:
             "errors": {k: v.value for k, v in self.errors.items()},
             "drops": self.drops.value,
             "imu_file_bytes": os.path.getsize(os.path.join(self.dir, "imu.bin")),
+            "imu_mean_hz": round(self.counts["imu"].value /
+                                max(0.001, (self.stopped or time.time()) - self.started), 2),
             "marks": self.marks,
         })
         with open(os.path.join(self.dir, "meta.json"), "w") as handle:
@@ -376,12 +381,19 @@ class Collector:
         except KeyboardInterrupt:
             pass
         finally:
+            self.stopped = time.time()
             self.stop.set()
+            self.rates_at_stop = {k: round(v.rate(), 2) for k, v in self.rates.items()}
+            if self.gps is not None:
+                try:
+                    self.gps.close()
+                except Exception:
+                    pass
             for thread in threads:
-                thread.join(timeout=1.0)
+                thread.join(timeout=0.5)
             self.flush()
             extra = {
-                "rates_final": {k: round(v.rate(), 2) for k, v in self.rates.items()},
+                "rates_final": self.rates_at_stop,
                 "imu_settings": {
                     "bus": self.args.imu_bus,
                     "address": hex(self.args.imu_address),
