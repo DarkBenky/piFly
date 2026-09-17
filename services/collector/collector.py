@@ -248,7 +248,7 @@ class Collector:
                 raw = getattr(self.gps, "last_raw", None)
                 if raw:
                     record["raw"] = raw
-                self.push("gps", record, None)
+                self.push("gps", record, record)
                 self.rates["gps"].add()
                 self.last["gps"] = record
                 self.gps_series.add(record["t"], (reading.get("lat") or 0.0,
@@ -273,7 +273,7 @@ class Collector:
                 self.errors["bme"].inc()
                 self.bme = None
                 continue
-            self.push("bme", record, None)
+            self.push("bme", record, record)
             self.rates["bme"].add()
             self.last["bme"] = record
             self.bme_series.add(record["timestamp"], (record["bme_temp_c"],
@@ -295,7 +295,7 @@ class Collector:
             record = {"t": time.time(), "mono_ns": time.monotonic_ns(),
                       "key": text, "label": label}
             self.marks.append(record)
-            self.push("marks", record, None)
+            self.push("marks", record, record)
 
     def payload(self):
         return {
