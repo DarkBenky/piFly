@@ -1,0 +1,439 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#111111">
+  <link rel="manifest" href="/static/manifest.json">
+  <title>piFly — Collector</title>
+  <script src="https://cdn.plot.ly/plotly-3.0.1.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #111;
+      --panel: #1a1a1a;
+      --panel-hover: #232323;
+      --border: #2a2a2a;
+      --border-hover: #3a3a3a;
+      --text: #ccc;
+      --text-bright: #eee;
+      --text-dim: #888;
+      --text-faint: #555;
+      --text-ghost: #3a3a3a;
+      --accent: #6cf;
+
+      --radius: 8px;
+      --radius-sm: 6px;
+      --ctrl-h: 34px;
+      --gap: 8px;
+
+      --c-accel: #6cf;
+      --c-gyro: #b98ee8;
+      --c-gps: #5fd6a8;
+      --c-baro: #e8a33d;
+      --ok: #5fd6a8;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: var(--bg); color: var(--text);
+      padding: 10px 12px 28px;
+    }
+    a { color: var(--accent); text-decoration: none; }
+
+    :focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+      border-radius: var(--radius-sm);
+    }
+
+    .topbar {
+      display: flex; align-items: baseline; justify-content: space-between;
+      flex-wrap: wrap; gap: 6px; margin-bottom: 8px;
+    }
+    .topbar h1 { font-size: 1.2rem; font-weight: 600; color: var(--text-bright); letter-spacing: 0.2px; }
+
+    .banner {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      background: var(--panel); border: 1px solid var(--border);
+      border-radius: 10px; padding: 10px 14px; margin-bottom: 10px;
+    }
+    .banner .item {
+      display: flex; flex-direction: column; gap: 2px;
+      padding: 2px 12px;
+      border-left: 1px solid var(--border);
+    }
+    .banner .item:first-child { border-left: none; padding-left: 0; }
+    .banner .item .val { font-size: 1.1rem; font-weight: 600; color: var(--text-bright); line-height: 1.4; }
+    .banner .item .lbl { font-size: 0.65rem; text-transform: uppercase; color: var(--text-faint); letter-spacing: 0.6px; }
+    .banner .age {
+      grid-column: 1 / -1;
+      display: flex; align-items: center; justify-content: flex-end; gap: 6px;
+      font-size: 0.68rem; color: var(--text-ghost);
+      margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border);
+      font-variant-numeric: tabular-nums;
+    }
+    .banner .empty { grid-column: 1 / -1; color: var(--text-faint); font-size: 0.85rem; padding: 4px 0; }
+
+    .badge { display: inline-block; align-self: flex-start; padding: 1px 10px; border-radius: 6px; font-size: 0.78rem; letter-spacing: 1px; }
+    .badge-static { color: #6cf; background: rgba(102, 204, 255, 0.10); border: 1px solid rgba(102, 204, 255, 0.32); }
+    .badge-move { color: #e8a33d; background: rgba(232, 163, 61, 0.10); border: 1px solid rgba(232, 163, 61, 0.32); }
+    .badge-unknown { color: var(--text-dim); background: rgba(255, 255, 255, 0.04); border: 1px solid var(--border-hover); }
+
+    .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 6px rgba(95, 214, 168, 0.7); }
+    .dot.stale { background: var(--text-ghost); box-shadow: none; }
+
+    .toolbar {
+      display: flex; flex-wrap: wrap; gap: var(--gap); align-items: center;
+      margin: 8px 0 10px;
+    }
+    .toolbar select,
+    .toolbar button {
+      height: var(--ctrl-h);
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 0 14px; color: var(--text); font-size: 0.8rem; font-family: inherit;
+      cursor: pointer; transition: background 0.15s, border-color 0.15s;
+    }
+    .toolbar select:hover,
+    .toolbar button:hover { background: var(--panel-hover); border-color: var(--border-hover); }
+    .toolbar .csv-btn { display: inline-flex; align-items: center; gap: 6px; }
+    .toolbar .flex-spacer { flex: 1 1 auto; }
+
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 12px;
+      background: var(--panel); border: 1px solid var(--border);
+      border-radius: 10px; padding: 12px 14px; margin-bottom: 10px;
+    }
+    .stat { display: flex; flex-direction: column; gap: 2px; }
+    .stat .s-val { font-size: 1.05rem; font-weight: 600; color: var(--text-bright); font-variant-numeric: tabular-nums; }
+    .stat .s-lbl { font-size: 0.62rem; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-faint); }
+    .readings {
+      grid-column: 1 / -1;
+      display: flex; flex-wrap: wrap; gap: 18px;
+      border-top: 1px solid var(--border); padding-top: 10px;
+      font-size: 0.78rem;
+    }
+    .reading { display: inline-flex; align-items: baseline; gap: 6px; }
+    .reading .r-lbl { font-size: 0.62rem; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-faint); }
+    .reading .r-val { color: var(--text); font-variant-numeric: tabular-nums; }
+
+    .charts { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+    .card {
+      background: var(--panel); border: 1px solid var(--border);
+      border-top: 2px solid var(--card-accent, var(--border));
+      border-radius: 10px; padding: 10px 12px 4px;
+    }
+    .card.accel { --card-accent: var(--c-accel); }
+    .card.gyro  { --card-accent: var(--c-gyro); }
+    .card.gps   { --card-accent: var(--c-gps); }
+    .card.baro  { --card-accent: var(--c-baro); }
+
+    .card-label {
+      display: flex; align-items: center; gap: 6px;
+      font-size: 0.7rem; font-weight: 600; text-transform: uppercase;
+      letter-spacing: 0.6px; color: var(--text-faint); margin-bottom: 2px;
+    }
+    .card-label::before {
+      content: ""; width: 7px; height: 7px; border-radius: 50%;
+      background: var(--card-accent, var(--text-faint));
+      flex: 0 0 auto;
+    }
+    .card .chart { width: 100%; height: 210px; }
+
+    .marks { margin-top: 10px; }
+    .mark-list {
+      display: flex; flex-direction: column; gap: 4px;
+      max-height: 230px; overflow-y: auto;
+      margin: 6px 0 8px;
+    }
+    .mark {
+      display: flex; align-items: center; gap: 10px;
+      font-size: 0.78rem;
+      background: rgba(255, 255, 255, 0.03);
+      border-radius: var(--radius-sm); padding: 4px 10px;
+    }
+    .mark .mark-t { color: var(--text-faint); font-variant-numeric: tabular-nums; }
+    .mark .mark-l { font-weight: 600; }
+    .mark-empty { font-size: 0.78rem; color: var(--text-ghost); padding: 2px 0 8px; }
+    .mk-static { color: #6cf; }
+    .mk-move { color: #e8a33d; }
+    .mk-rotate { color: #5fd6a8; }
+    .mk-bump { color: #ff8f6b; }
+    .mk-lift { color: #b98ee8; }
+    .mk-place { color: #7fd1ff; }
+    .mk-walk { color: #e8e36b; }
+    .mk-other { color: var(--text-dim); }
+
+    .refresh-bar {
+      display: flex; align-items: center; gap: 10px; margin-top: 16px;
+      font-size: 0.7rem; color: var(--text-ghost);
+    }
+    .refresh-bar .bar {
+      flex: 1; height: 3px; background: var(--border); border-radius: 2px; overflow: hidden;
+    }
+    .refresh-bar .bar .fill { height: 100%; background: var(--accent); opacity: 0.55; transition: width 1s linear; }
+    .refresh-bar #refresh-count { min-width: 30px; text-align: right; }
+
+    footer { text-align: center; font-size: 0.65rem; color: var(--text-ghost); margin-top: 14px; }
+
+    @media (max-width: 900px) {
+      .charts { grid-template-columns: 1fr; }
+    }
+
+    @media (max-width: 520px) {
+      .banner { grid-template-columns: repeat(2, 1fr); row-gap: 10px; }
+      .banner .item:nth-child(3) { border-left: none; }
+      .stats { grid-template-columns: repeat(2, 1fr); }
+      .toolbar select { flex: 1 1 auto; }
+    }
+  </style>
+</head>
+<body>
+
+<div class="topbar">
+  <h1>piFly Collector</h1>
+</div>
+
+<div class="banner" id="banner">
+  <div class="item"><span class="val" id="b-label">--</span><span class="lbl">Mode</span></div>
+  <div class="item"><span class="val" id="b-duration">--</span><span class="lbl">Duration</span></div>
+  <div class="item"><span class="val" id="b-imu">--</span><span class="lbl">IMU rate</span></div>
+  <div class="item"><span class="val" id="b-drops">--</span><span class="lbl">Drops</span></div>
+  <div class="age">
+    <span class="dot stale" id="b-dot"></span>
+    <span id="b-age-text">waiting for session</span>
+  </div>
+</div>
+
+<div class="toolbar">
+  <select id="session" onchange="switchSession(this.value)" aria-label="Session">
+    <option value="">Latest</option>
+    {% for s in sessions %}
+    <option value="{{ s.session_id }}" {% if session and s.session_id == session.session_id %}selected{% endif %}>{{ s.label }} &middot; {{ s.session_id }}{% if s.name %} &middot; {{ s.name }}{% endif %}</option>
+    {% endfor %}
+  </select>
+  <div class="flex-spacer"></div>
+  <button class="csv-btn" onclick="downloadCSV()">&#8615; CSV</button>
+</div>
+
+<div class="stats">
+  <div class="stat"><span class="s-val" id="s-imu-rate">--</span><span class="s-lbl">IMU Hz</span></div>
+  <div class="stat"><span class="s-val" id="s-imu-count">--</span><span class="s-lbl">IMU samples</span></div>
+  <div class="stat"><span class="s-val" id="s-gps-rate">--</span><span class="s-lbl">GPS Hz</span></div>
+  <div class="stat"><span class="s-val" id="s-gps-count">--</span><span class="s-lbl">GPS fixes</span></div>
+  <div class="stat"><span class="s-val" id="s-bme-rate">--</span><span class="s-lbl">BME Hz</span></div>
+  <div class="stat"><span class="s-val" id="s-bme-count">--</span><span class="s-lbl">BME samples</span></div>
+  <div class="stat"><span class="s-val" id="s-errors">--</span><span class="s-lbl">Errors</span></div>
+  <div class="stat"><span class="s-val" id="s-drops">--</span><span class="s-lbl">Drops</span></div>
+  <div class="readings">
+    <span class="reading"><span class="r-lbl">BME</span><span class="r-val" id="l-bme">--</span></span>
+    <span class="reading"><span class="r-lbl">GPS</span><span class="r-val" id="l-gps">--</span></span>
+    <span class="reading"><span class="r-lbl">Last mark</span><span class="r-val" id="l-mark">--</span></span>
+  </div>
+</div>
+
+<div class="charts">
+  <div class="card accel">
+    <div class="card-label">Accelerometer</div>
+    <div class="chart" id="chart-accel"></div>
+  </div>
+  <div class="card gyro">
+    <div class="card-label">Gyroscope</div>
+    <div class="chart" id="chart-gyro"></div>
+  </div>
+  <div class="card gps">
+    <div class="card-label">GPS</div>
+    <div class="chart" id="chart-gps"></div>
+  </div>
+  <div class="card baro">
+    <div class="card-label">Barometer</div>
+    <div class="chart" id="chart-baro"></div>
+  </div>
+</div>
+
+<div class="card marks">
+  <div class="card-label">Marks</div>
+  <div class="mark-list" id="mark-list"><span class="mark-empty">no marks yet</span></div>
+</div>
+
+<div class="refresh-bar">
+  <span>Auto-refresh in</span>
+  <div class="bar"><div class="fill" id="refresh-fill" style="width:100%"></div></div>
+  <span id="refresh-count">60s</span>
+</div>
+
+<footer>piFly &copy; 2026</footer>
+
+<script>
+var cfg = { responsive: true, displayModeBar: false };
+
+Plotly.newPlot("chart-accel", {{ graph_accel | safe }}.data, {{ graph_accel | safe }}.layout, cfg);
+Plotly.newPlot("chart-gyro", {{ graph_gyro | safe }}.data, {{ graph_gyro | safe }}.layout, cfg);
+Plotly.newPlot("chart-gps", {{ graph_gps | safe }}.data, {{ graph_gps | safe }}.layout, cfg);
+Plotly.newPlot("chart-baro", {{ graph_baro | safe }}.data, {{ graph_baro | safe }}.layout, cfg);
+
+var SESSION = {{ (session.session_id if session else "") | tojson }};
+var FOLLOW = {{ (1 if follow else 0) }};
+var LIVE = {{ live | tojson }};
+var AGE = {{ age | tojson }};
+var AGE_AT = Date.now();
+var POLL_URL = FOLLOW ? "/api/live/latest" : (SESSION ? "/api/live/" + encodeURIComponent(SESSION) : null);
+
+var LABEL_CLASS = { static: "badge-static", move: "badge-move" };
+var MARK_CLASS = {
+  static: "mk-static", move: "mk-move", rotate: "mk-rotate", bump: "mk-bump",
+  lift: "mk-lift", place: "mk-place", walk: "mk-walk"
+};
+
+function setText(id, text) {
+  var el = document.getElementById(id);
+  if (el) el.textContent = text;
+}
+
+function fmtDuration(seconds) {
+  seconds = Math.max(0, Math.round(seconds || 0));
+  if (seconds < 60) return seconds + "s";
+  var minutes = Math.floor(seconds / 60), rest = seconds % 60;
+  return minutes + "m " + (rest < 10 ? "0" : "") + rest + "s";
+}
+
+function fmtNum(value, digits) {
+  if (value === null || value === undefined) return "--";
+  return Number(value).toFixed(digits);
+}
+
+function fmtTime(ts) {
+  return new Date(ts * 1000).toTimeString().slice(0, 8);
+}
+
+function fmtLat(lat, lon) {
+  return Math.abs(lat).toFixed(5) + "\u00b0" + (lat >= 0 ? "N" : "S") + " " +
+         Math.abs(lon).toFixed(5) + "\u00b0" + (lon >= 0 ? "E" : "W");
+}
+
+function esc(text) {
+  return String(text).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+function totalErrors(errors) {
+  if (!errors) return 0;
+  return Object.keys(errors).reduce(function(sum, key) { return sum + (errors[key] || 0); }, 0);
+}
+
+function renderMarks(marks) {
+  var list = document.getElementById("mark-list");
+  if (!marks || !marks.length) {
+    list.innerHTML = '<span class="mark-empty">no marks yet</span>';
+    return;
+  }
+  var rows = marks.slice(-12).reverse();
+  var html = "";
+  for (var i = 0; i < rows.length; i++) {
+    var cls = MARK_CLASS[rows[i].label] || "mk-other";
+    html += '<div class="mark"><span class="mark-t">' + fmtTime(rows[i].t) + '</span>' +
+            '<span class="mark-l ' + cls + '">' + esc(rows[i].label) + '</span></div>';
+  }
+  list.innerHTML = html;
+}
+
+function render(d) {
+  if (!d) return;
+  var el = document.getElementById("b-label");
+  el.textContent = (d.label || "unknown").toUpperCase();
+  el.className = "val badge " + (LABEL_CLASS[d.label] || "badge-unknown");
+  setText("b-duration", fmtDuration(d.duration_s));
+  setText("b-imu", fmtNum((d.rates || {}).imu, 0) + " Hz");
+  setText("b-drops", d.drops || 0);
+  setText("s-imu-rate", fmtNum((d.rates || {}).imu, 1));
+  setText("s-imu-count", ((d.counts || {}).imu || 0).toLocaleString());
+  setText("s-gps-rate", fmtNum((d.rates || {}).gps, 1));
+  setText("s-gps-count", ((d.counts || {}).gps || 0).toLocaleString());
+  setText("s-bme-rate", fmtNum((d.rates || {}).bme, 1));
+  setText("s-bme-count", ((d.counts || {}).bme || 0).toLocaleString());
+  setText("s-errors", totalErrors(d.errors));
+  setText("s-drops", d.drops || 0);
+  var bme = d.bme;
+  setText("l-bme", bme ? fmtNum(bme.bme_temp_c, 2) + " \u00b0C \u00b7 " +
+                        fmtNum(bme.bme_pressure_hpa, 2) + " hPa \u00b7 " +
+                        fmtNum(bme.bme_humidity_pct, 1) + " %" : "--");
+  var gps = d.gps;
+  setText("l-gps", gps && gps.lat !== null && gps.lat !== undefined ?
+                   fmtLat(gps.lat, gps.lon) + " \u00b7 " + fmtNum(gps.alt_m, 0) + " m \u00b7 " +
+                   (gps.sats || 0) + " sats" : "no fix");
+  var marks = d.marks || [];
+  setText("l-mark", marks.length ?
+                   fmtTime(marks[marks.length - 1].t) + " " + marks[marks.length - 1].label : "--");
+  renderMarks(marks);
+}
+
+function tick() {
+  var dot = document.getElementById("b-dot");
+  var text = document.getElementById("b-age-text");
+  if (!SESSION) {
+    dot.className = "dot stale";
+    text.textContent = "no session";
+    return;
+  }
+  if (!FOLLOW || AGE === null) {
+    dot.className = "dot stale";
+    text.textContent = SESSION + " \u00b7 snapshot";
+    return;
+  }
+  var age = AGE + (Date.now() - AGE_AT) / 1000;
+  dot.className = age < 15 ? "dot" : "dot stale";
+  text.textContent = SESSION + " \u00b7 ping " + age.toFixed(1) + "s ago";
+}
+
+function poll() {
+  if (!POLL_URL) return;
+  fetch(POLL_URL)
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+      if (FOLLOW) {
+        if (d.session && d.session.session_id !== SESSION) { location.reload(); return; }
+        if (!d.payload) return;
+        LIVE = d.payload;
+        AGE = d.age;
+        AGE_AT = Date.now();
+      } else {
+        LIVE = d;
+      }
+      render(LIVE);
+    })
+    .catch(function() {});
+}
+
+function switchSession(id) {
+  window.location.href = id ? "?session=" + encodeURIComponent(id) : "/";
+}
+
+function downloadCSV() {
+  if (!SESSION) return;
+  window.location.href = "/api/live/" + encodeURIComponent(SESSION) + "/csv?stream=imu";
+}
+
+render(LIVE);
+tick();
+
+setInterval(poll, 5000);
+setInterval(tick, 1000);
+
+var REFRESH_SEC = 60;
+var remaining = REFRESH_SEC;
+
+setInterval(function() {
+  remaining--;
+  if (remaining <= 0) { location.reload(); return; }
+  document.getElementById("refresh-count").textContent = remaining + "s";
+  document.getElementById("refresh-fill").style.width = (remaining / REFRESH_SEC * 100) + "%";
+}, 1000);
+</script>
+
+</body>
+</html>
