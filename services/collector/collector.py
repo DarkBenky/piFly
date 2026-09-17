@@ -183,6 +183,8 @@ class Collector:
             handle.close()
 
     def push(self, name, item, payload):
+        if self.stop.is_set():
+            return
         try:
             self.queues[name].put_nowait(item)
         except queue.Full:
