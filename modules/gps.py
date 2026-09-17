@@ -63,9 +63,11 @@ class GPS:
     def __init__(self, port: str = PORT, baud: int = BAUD):
         self._ser = serial.Serial(port, baud, timeout=2.0)
         self._last_time: str | None = None
+        self.last_raw: list[str] = []
 
     def read(self) -> dict | None:
         data: dict = {}
+        raw_lines: list[str] = []
         while True:
             try:
                 raw = self._ser.readline()
@@ -76,13 +78,16 @@ class GPS:
             line = raw.decode("ascii", errors="replace").strip()
             if not line:
                 continue
+            raw_lines.append(line)
             _parse(line, data)
 
             if line.startswith(("$GNRMC", "$GPRMC")):
                 if self._last_time is not None and data.get("time") != self._last_time:
                     self._last_time = data.get("time")
+                    self.last_raw = raw_lines
                     return data
                 self._last_time = data.get("time")
+                raw_lines = []
 
     def close(self) -> None:
         self._ser.close()
