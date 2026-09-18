@@ -93,7 +93,7 @@ def _to_signed(value):
 
 class IcmFifo:
     def __init__(self, bus=1, address=0x69, odr=1125, accel_fs=2, gyro_fs=250,
-                 accel_dlpf=1, gyro_dlpf=1, fifo_mask=0x1E, mag=False,
+                 accel_dlpf=0, gyro_dlpf=0, fifo_mask=0x1E, mag=False,
                  mag_rate=MAG_MODE_100HZ):
         self.bus = SMBus(bus)
         self.address = address
@@ -132,16 +132,18 @@ class IcmFifo:
 
     def _configure(self):
         self._bank(BANK_0)
+        self._write(B0_PWR_MGMT_1, 0x80)
+        time.sleep(0.12)
         self._write(B0_PWR_MGMT_1, 0x01)
-        self._write(B0_PWR_MGMT_2, 0x00)
         time.sleep(0.05)
+        self._write(B0_PWR_MGMT_2, 0x01)
         self._bank(BANK_2)
-        self._write(B2_ODR_ALIGN_EN, 0x01)
+        self._write(B2_ODR_ALIGN_EN, 0x00)
         self._write(B2_GYRO_SMPLRT_DIV, 0x00)
-        self._write(B2_GYRO_CONFIG_1, self.gyro_dlpf << 3 | self.gyro_fs_bits)
+        self._write(B2_GYRO_CONFIG_1, self.gyro_dlpf << 3 | self.gyro_fs_bits | 0x01)
         self._write(B2_ACCEL_SMPLRT_DIV_1, 0x00)
         self._write(B2_ACCEL_SMPLRT_DIV_2, 0x00)
-        self._write(B2_ACCEL_CONFIG, self.accel_dlpf << 3 | self.accel_fs_bits)
+        self._write(B2_ACCEL_CONFIG, self.accel_dlpf << 3 | self.accel_fs_bits | 0x01)
         self._bank(BANK_0)
         self._write(B0_USER_CTRL, 0x40)
         self._write(B0_FIFO_MODE, 0x00)

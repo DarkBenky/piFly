@@ -2,7 +2,6 @@ import argparse
 import json
 import os
 import platform
-import queue
 import signal
 import socket
 import struct
@@ -29,6 +28,8 @@ MARK_LABELS = {
     "w": "walk",
 }
 SCHEMA_VERSION = 1
+STREAMS = ("imu", "mag", "gps", "bme", "marks")
+MAX_PENDING = 200_000
 
 
 def parse_args(argv):
@@ -61,16 +62,6 @@ def git_commit():
         return ""
 
 
-def drain(target, batch=256):
-    items = []
-    for _ in range(batch):
-        try:
-            items.append(target.get_nowait())
-        except queue.Empty:
-            break
-    return items
-
-
 class Collector:
     def __init__(self, args):
         self.args = args
@@ -78,14 +69,7 @@ class Collector:
         self.session_id = f"{int(time.time())}-{self.label}"
         self.dir = os.path.join(args.out, self.session_id)
         self.stop = threading.Event()
-        self.queues = {
-            "imu": queue.Queue(maxsize=200_000),
-            "mag": queue.Queue(maxsize=20_000),
-            "gps": queue.Queue(maxsize=1000),
-            "bme": queue.Queue(maxsize=1000),
-            "marks": queue.Queue(maxsize=1000),
-        }
-        self.counts = {name: Counter() for name in self.queues}
+        self.counts = {name: Counter() for name in STREAMS}
         self.errors = {"imu": Counter(), "gps": Counter(), "bme": Counter(), "upload": Counter()}
         self.drops = Counter()
         self.rates = {
@@ -185,12 +169,14 @@ class Collector:
             handle.flush()
             handle.close()
 
-    def push(self, name, item, payload):
+    def pending(self, name):
+        with self.buffer_lock:
+            return len(self.buffers[name])
+
+    def push(self, name, payload):
         if not self.accepting:
             return
-        try:
-            self.queues[name].put_nowait(item)
-        except queue.Full:
+        if self.pending(name) >= MAX_PENDING:
             self.drops.inc()
             return
         self.counts[name].inc()
@@ -214,7 +200,7 @@ class Collector:
                 payload = IMU_STRUCT.pack(sample.t_mono_ns, sample.t_epoch_ns,
                                           sample.ax, sample.ay, sample.az,
                                           sample.gx, sample.gy, sample.gz)
-                self.push("imu", sample, payload)
+                self.push("imu", payload)
                 self.rates["imu"].add()
                 self.imu_series.add(sample.t_epoch_ns / 1e9,
                                     (sample.ax, sample.ay, sample.az, sample.gx, sample.gy, sample.gz))
@@ -235,8 +221,8 @@ class Collector:
             except OSError:
                 sample = None
             if sample:
-                self.push("mag", sample, MAG_STRUCT.pack(sample.t_mono_ns, sample.t_epoch_ns,
-                                                         sample.mx, sample.my, sample.mz))
+                self.push("mag", MAG_STRUCT.pack(sample.t_mono_ns, sample.t_epoch_ns,
+                                                 sample.mx, sample.my, sample.mz))
                 self.rates["mag"].add()
             time.sleep(period)
 
@@ -258,7 +244,7 @@ class Collector:
                 raw = getattr(self.gps, "last_raw", None)
                 if raw:
                     record["raw"] = raw
-                self.push("gps", record, record)
+                self.push("gps", record)
                 self.rates["gps"].add()
                 self.last["gps"] = record
                 self.gps_series.add(record["t"], (reading.get("lat") or 0.0,
@@ -283,7 +269,7 @@ class Collector:
                 self.errors["bme"].inc()
                 self.bme = None
                 continue
-            self.push("bme", record, record)
+            self.push("bme", record)
             self.rates["bme"].add()
             self.last["bme"] = record
             self.bme_series.add(record["timestamp"], (record["bme_temp_c"],
@@ -305,7 +291,7 @@ class Collector:
             record = {"t": time.time(), "mono_ns": time.monotonic_ns(),
                       "key": text, "label": label}
             self.marks.append(record)
-            self.push("marks", record, record)
+            self.push("marks", record)
 
     def payload(self):
         return {
