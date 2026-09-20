@@ -1,0 +1,17 @@
+[Unit]
+Description=piFly tmux services (temperature client and collector)
+After=network-online.target time-sync.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+User=user
+Group=user
+Environment=HOME=/home/user
+WorkingDirectory=/home/user
+ExecStart=/usr/local/bin/pi-services start
+ExecStop=/usr/local/bin/pi-services stop
+
+[Install]
+WantedBy=multi-user.target
