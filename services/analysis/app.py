@@ -46,6 +46,15 @@ def cached_jsonl(path, stream, t0, t1, max_records=300_000):
     return loader.read_jsonl(path, stream, t0, t1, max_records=max_records)
 
 
+@st.cache_data(show_spinner=False)
+def gps_coverage(session_path):
+    rows = loader.read_jsonl(session_path, "gps", None, None, max_records=2_000_000)
+    times = [row["t"] for row in rows if row.get("t") is not None]
+    if not times:
+        return None
+    return {"count": len(times), "t0": min(times), "t1": max(times)}
+
+
 def padded_frame(columns):
     length = max((len(value) for value in columns.values() if value is not None), default=0)
     data = {}
@@ -193,11 +202,24 @@ with st.sidebar:
                f"{' · meta ✓' if session['has_meta'] else ' · no meta (killed)'}")
 
     whole = st.checkbox("whole session", value=False)
+    slider_key = f"window_{session_id}"
+    pending = st.session_state.pop("jump_target", None)
+    if pending and pending[0] == session_id:
+        st.session_state[slider_key] = (pending[1], pending[2])
     if whole:
         win0, win1 = 0.0, duration
     else:
         default_end = min(60.0, duration)
-        win0, win1 = st.slider("window (s)", 0.0, float(duration), (0.0, float(default_end)), step=1.0)
+        win0, win1 = st.slider("window (s)", 0.0, float(duration), (0.0, float(default_end)),
+                               step=1.0, key=slider_key)
+
+    coverage = gps_coverage(session["path"])
+    if coverage:
+        gps_lo_s = max(0.0, coverage["t0"] - t0_epoch)
+        gps_hi_s = min(duration, coverage["t1"] - t0_epoch)
+        st.caption(f"session gps — {coverage['count']} fixes · {gps_lo_s / 60:.1f} → {gps_hi_s / 60:.1f} min")
+    else:
+        st.caption("session gps — none recorded")
     max_points = st.select_slider("max samples in window", [200_000, 500_000, 2_000_000, 5_000_000], value=2_000_000)
     timeout = st.slider("timeout (s)", 1.0, 120.0, 10.0, step=1.0)
 
@@ -206,6 +228,12 @@ with st.sidebar:
     bme_rows = cached_jsonl(session["path"], "bme", t0_epoch + win0, t0_epoch + win1, 500_000)
     mark_rows = cached_jsonl(session["path"], "marks", t0_epoch + win0, t0_epoch + win1, 5_000)
     st.caption(f"in window — gps {len(gps_rows)} · bme {len(bme_rows)} · marks {len(mark_rows)}")
+    if coverage and not gps_rows and not whole:
+        st.warning(f"no GPS fixes in this window — they start at {gps_lo_s / 60:.1f} min")
+        if st.button("⤓ jump to GPS data", width="stretch"):
+            start = max(0.0, gps_lo_s - 15.0)
+            st.session_state["jump_target"] = (session_id, start, min(duration, start + 60.0))
+            st.rerun()
 
     st.divider()
     col_a, col_b = st.columns(2)
@@ -362,7 +390,13 @@ with right:
                                                       "carto-positron", "white-bg (no tiles)"])
             figure = map_figure(result, yaw, "white-bg" if style.startswith("white") else style)
             if figure is None:
-                st.info("no path returned — add a `path` (lat/lon) or `position` to your result")
+                if coverage and not gps_rows:
+                    st.info(f"no GPS fixes in this window — this session has {coverage['count']} fixes from "
+                            f"{gps_lo_s / 60:.1f} to {gps_hi_s / 60:.1f} min of the recording")
+                elif not coverage:
+                    st.info("this session has no GPS data at all")
+                else:
+                    st.info("your result has no `path`/`position` — return one to draw it here")
             else:
                 st.plotly_chart(figure, width="stretch")
                 lat = result["arrays"].get("path__lat")
