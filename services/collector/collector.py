@@ -408,7 +408,8 @@ class Collector:
 def main():
     args = parse_args(sys.argv[1:])
     collector = Collector(args)
-    signal.signal(signal.SIGTERM, lambda *_: collector.stop.set())
+    for sig in (signal.SIGTERM, signal.SIGHUP):
+        signal.signal(sig, lambda *_: collector.stop.set())
     collector.run()
 
 
