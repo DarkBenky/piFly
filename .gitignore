@@ -1,3 +1,5 @@
 logs
 logs/*.json
 logs/*.log
+__pycache__
+services/analysis/cache/
