@@ -1,4 +1,5 @@
 import json
+import math
 import os
 import sys
 
@@ -157,6 +158,104 @@ def path_plot_figure(result, yaw_offset=0.0):
                       paper_bgcolor="#1a1a1a", plot_bgcolor="#1a1a1a", hovermode="closest",
                       xaxis=dict(title="east (m)", gridcolor="#2a2a2a", scaleanchor="y", scaleratio=1),
                       yaxis=dict(title="north (m)", gridcolor="#2a2a2a"), legend=dict(orientation="h", y=1.06))
+    return fig
+
+
+def _tile_xy(lat, lon, zoom):
+    count = 2.0 ** zoom
+    x = (lon + 180.0) / 360.0 * count
+    y = (1.0 - math.asinh(math.tan(math.radians(lat))) / math.pi) / 2.0 * count
+    return x, y
+
+
+def _tile_corner(tx, ty, zoom):
+    count = 2.0 ** zoom
+    lon = tx / count * 360.0 - 180.0
+    lat = math.degrees(math.atan(math.sinh(math.pi * (1 - 2 * ty / count))))
+    return lat, lon
+
+
+@st.cache_data(show_spinner=False, ttl=6 * 3600)
+def fetch_basemap(lat_min, lat_max, lon_min, lon_max, max_tiles=4):
+    import io
+    import urllib.request
+    from PIL import Image, ImageEnhance, ImageOps
+
+    zoom = 9
+    for candidate in range(19, 8, -1):
+        x0, y0 = _tile_xy(lat_max, lon_min, candidate)
+        x1, y1 = _tile_xy(lat_min, lon_max, candidate)
+        if (x1 - x0) <= max_tiles and (y1 - y0) <= max_tiles:
+            zoom = candidate
+            break
+    x0, y0 = _tile_xy(lat_max, lon_min, zoom)
+    x1, y1 = _tile_xy(lat_min, lon_max, zoom)
+    tx0, ty0 = int(math.floor(x0)), int(math.floor(y0))
+    tx1, ty1 = int(math.floor(x1)), int(math.floor(y1))
+    cols, rows = tx1 - tx0 + 1, ty1 - ty0 + 1
+    mosaic = Image.new("RGB", (cols * 256, rows * 256), (16, 17, 21))
+    fetched = 0
+    for row in range(rows):
+        for col in range(cols):
+            url = f"https://tile.openstreetmap.org/{zoom}/{tx0 + col}/{ty0 + row}.png"
+            try:
+                request = urllib.request.Request(url, headers={"User-Agent": "piFly-analysis/0.1 (personal use)"})
+                with urllib.request.urlopen(request, timeout=8) as response:
+                    tile = Image.open(io.BytesIO(response.read())).convert("L")
+                tile = ImageOps.invert(tile)
+                tile = ImageEnhance.Brightness(tile).enhance(0.9)
+                tile = ImageEnhance.Contrast(tile).enhance(0.85)
+                mosaic.paste(tile.convert("RGB"), (col * 256, row * 256))
+                fetched += 1
+            except Exception:
+                continue
+    if fetched == 0:
+        return None
+    buffer = io.BytesIO()
+    mosaic.save(buffer, format="PNG", optimize=True)
+    lat_top, lon_left = _tile_corner(tx0, ty0, zoom)
+    lat_bottom, lon_right = _tile_corner(tx1 + 1, ty1 + 1, zoom)
+    return {"png": buffer.getvalue(), "bounds": (lon_left, lat_bottom, lon_right, lat_top),
+            "zoom": zoom, "tiles": fetched}
+
+
+def static_map_figure(result, yaw_offset=0.0):
+    import io
+    from PIL import Image
+
+    arrays = result["arrays"]
+    lat, lon = arrays.get("path__lat"), arrays.get("path__lon")
+    if lat is None or not len(lat):
+        return None
+    lat_min, lat_max = float(np.min(lat)), float(np.max(lat))
+    lon_min, lon_max = float(np.min(lon)), float(np.max(lon))
+    pad = max(0.0004, 0.25 * max(lat_max - lat_min, lon_max - lon_min))
+    mosaic = fetch_basemap(lat_min - pad, lat_max + pad, lon_min - pad, lon_max + pad)
+    if mosaic is None:
+        return None
+    left, bottom, right, top = mosaic["bounds"]
+    fig = go.Figure()
+    fig.add_layout_image(dict(source=Image.open(io.BytesIO(mosaic["png"])), xref="x", yref="y",
+                              x=left, y=bottom, sizex=right - left, sizey=top - bottom,
+                              xanchor="left", yanchor="bottom", sizing="stretch", layer="below"))
+    fig.add_trace(go.Scatter(x=lon, y=lat, mode="lines+markers", name="gps path",
+                             line=dict(color="#6cf", width=2), marker=dict(size=4)))
+    fig.add_trace(go.Scatter(x=[lon[0]], y=[lat[0]], mode="markers", name="start",
+                             marker=dict(size=12, color="#5fd6a8")))
+    pos_east, pos_north = arrays.get("position__east"), arrays.get("position__north")
+    if pos_east is not None and pos_north is not None:
+        angle = np.radians(yaw_offset)
+        imu_lat, imu_lon = helpers_enu_to_gps(pos_east * np.cos(angle) - pos_north * np.sin(angle),
+                                              pos_east * np.sin(angle) + pos_north * np.cos(angle),
+                                              float(lat[0]), float(lon[0]))
+        fig.add_trace(go.Scatter(x=imu_lon, y=imu_lat, mode="lines", name="imu position",
+                                 line=dict(color="#e8a33d", width=1.5)))
+    mid_lat = (lat_min + lat_max) / 2.0
+    fig.update_layout(template="plotly_dark", height=520, margin=dict(l=0, r=0, t=28, b=0),
+                      paper_bgcolor="#1a1a1a", legend=dict(orientation="h", y=1.03),
+                      xaxis=dict(range=[left, right], showgrid=False, showticklabels=False, zeroline=False),
+                      yaxis=dict(range=[bottom, top], showgrid=False, showticklabels=False, zeroline=False,
+                                 scaleanchor="x", scaleratio=float(math.cos(math.radians(mid_lat)))))
     return fig
 
 
@@ -414,9 +513,12 @@ with right:
             yaw = map_cols[0].slider("imu path rotation (deg)", -180.0, 180.0, 0.0, step=5.0)
             style = map_cols[1].selectbox("basemap", ["carto-darkmatter", "open-street-map",
                                                       "carto-positron", "white-bg (no tiles)",
+                                                      "static tiles (app-fetched)",
                                                       "plain plot — no tiles, no WebGL"])
             if style.startswith("plain"):
                 figure = path_plot_figure(result, yaw)
+            elif style.startswith("static"):
+                figure = static_map_figure(result, yaw)
             else:
                 figure = map_figure(result, yaw, "white-bg" if style.startswith("white") else style)
             if figure is None:
@@ -425,6 +527,8 @@ with right:
                             f"{gps_lo_s / 60:.1f} to {gps_hi_s / 60:.1f} min of the recording")
                 elif not coverage:
                     st.info("this session has no GPS data at all")
+                elif style.startswith("static"):
+                    st.info("could not fetch map tiles from the app process (offline?)")
                 else:
                     st.info("your result has no `path`/`position` — return one to draw it here")
             else:
@@ -432,6 +536,9 @@ with right:
                 if style.startswith("plain"):
                     st.caption("tile-free view — if the map stays empty in your browser, WebGL is disabled "
                                "or the tile requests are blocked")
+                elif style.startswith("static"):
+                    st.caption("tiles fetched and stitched by the app — no WebGL and no third-party requests "
+                               "from your browser · © OpenStreetMap contributors")
                 lat = result["arrays"].get("path__lat")
                 lon = result["arrays"].get("path__lon")
                 if lat is not None and len(lat) > 1:
