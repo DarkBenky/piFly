@@ -6,7 +6,12 @@ import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
-from code_editor import code_editor
+
+try:
+    from code_editor import code_editor
+    HAS_EDITOR = True
+except Exception:
+    HAS_EDITOR = False
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import executor
@@ -34,6 +39,11 @@ def envelope(t, v, buckets=1500):
         mid.append(np.nanmean(chunk))
         tm.append(t[a:b].mean())
     return np.array(tm), np.array(lo), np.array(hi), np.array(mid)
+
+
+@st.cache_data(show_spinner=False)
+def cached_jsonl(path, stream, t0, t1, max_records=300_000):
+    return loader.read_jsonl(path, stream, t0, t1, max_records=max_records)
 
 
 def padded_frame(columns):
@@ -192,9 +202,9 @@ with st.sidebar:
     timeout = st.slider("timeout (s)", 1.0, 120.0, 10.0, step=1.0)
 
     st.divider()
-    gps_rows = loader.read_jsonl(session["path"], "gps", t0_epoch + win0, t0_epoch + win1, max_records=500_000)
-    bme_rows = loader.read_jsonl(session["path"], "bme", t0_epoch + win0, t0_epoch + win1, max_records=500_000)
-    mark_rows = loader.read_jsonl(session["path"], "marks", t0_epoch + win0, t0_epoch + win1, max_records=5000)
+    gps_rows = cached_jsonl(session["path"], "gps", t0_epoch + win0, t0_epoch + win1, 500_000)
+    bme_rows = cached_jsonl(session["path"], "bme", t0_epoch + win0, t0_epoch + win1, 500_000)
+    mark_rows = cached_jsonl(session["path"], "marks", t0_epoch + win0, t0_epoch + win1, 5_000)
     st.caption(f"in window — gps {len(gps_rows)} · bme {len(bme_rows)} · marks {len(mark_rows)}")
 
     st.divider()
@@ -217,20 +227,26 @@ left, right = st.columns([1.35, 2.0], gap="medium")
 
 with left:
     st.subheader("Function")
-    response = code_editor(
-        st.session_state["loaded_code"],
-        lang="python",
-        theme="dark",
-        shortcuts="vscode",
-        height=[18, 30],
-        key=f"editor_{st.session_state['editor_rev']}",
-        info={"name": "process(x)", "description": "x: window arrays · return dict with path/position/velocity/series/stats"},
-    )
-    if response and response.get("text"):
-        st.session_state["current_code"] = response["text"]
-    code_now = st.session_state["current_code"]
-    if response and response.get("type") == "submit":
-        st.session_state["run_requested"] = True
+    if HAS_EDITOR:
+        response = code_editor(
+            st.session_state["loaded_code"],
+            lang="python",
+            theme="dark",
+            shortcuts="vscode",
+            height=[18, 30],
+            key=f"editor_{st.session_state['editor_rev']}",
+            info={"name": "process(x)", "description": "x: window arrays · return dict with path/position/velocity/series/stats"},
+        )
+        if response and response.get("text"):
+            st.session_state["current_code"] = response["text"]
+        code_now = st.session_state["current_code"]
+        if response and response.get("type") == "submit":
+            st.session_state["run_requested"] = True
+    else:
+        edited = st.text_area("process(x)", st.session_state["current_code"], height=420,
+                              key=f"fallback_{st.session_state['editor_rev']}")
+        st.session_state["current_code"] = edited
+        code_now = edited
 
     with st.expander("inputs & units"):
         st.markdown(
@@ -261,19 +277,21 @@ with left:
         st.success(f"saved {os.path.basename(target)}")
 
     result = st.session_state["result"]
-    if result:
-        if result["ok"]:
-            st.caption(f"ran in {result['runtime']:.2f}s · {len(result['arrays'])} arrays")
-        else:
-            st.error("run failed")
-            st.code(result["error"], language="text")
-        if result.get("stdout"):
-            with st.expander("stdout"):
-                st.code(result["stdout"], language="text")
+    if result and result["ok"]:
+        st.caption(f"ran in {result['runtime']:.2f}s · {len(result['arrays'])} arrays")
+        if st.session_state.get("last_run_code") != st.session_state["current_code"]:
+            st.warning("code changed — press ▶ Run")
+    elif result and not result["ok"]:
+        st.error("run failed")
+        st.code(result["error"], language="text")
+    if result and result.get("stdout"):
+        with st.expander("stdout"):
+            st.code(result["stdout"], language="text")
 
+run_key = (session_id, round(win0, 2), round(win1, 2), bool(whole), int(max_points))
 run_requested = st.session_state.pop("run_requested", False)
-needs_first_run = st.session_state["result"] is None or st.session_state["result"].get("session_id") != session_id
-if (run_requested or needs_first_run) and session["records"]:
+stale = st.session_state.get("last_run_key") != run_key
+if (run_requested or stale) and session["records"]:
     with st.spinner("running…"):
         window = imu.window(t0_epoch + win0, t0_epoch + win1, max_points=max_points)
         if window is None:
@@ -293,6 +311,8 @@ if (run_requested or needs_first_run) and session["records"]:
             outcome["stride"] = window["stride"]
             outcome["samples"] = len(window["t"])
             st.session_state["result"] = outcome
+            st.session_state["last_run_key"] = run_key
+            st.session_state["last_run_code"] = st.session_state["current_code"]
             result = outcome
 
 result = st.session_state["result"]
@@ -345,6 +365,13 @@ with right:
                 st.info("no path returned — add a `path` (lat/lon) or `position` to your result")
             else:
                 st.plotly_chart(figure, width="stretch")
+                lat = result["arrays"].get("path__lat")
+                lon = result["arrays"].get("path__lon")
+                if lat is not None and len(lat) > 1:
+                    width_m = float(np.ptp(lon)) * 111_320 * np.cos(np.radians(np.mean(lat)))
+                    height_m = float(np.ptp(lat)) * 110_540
+                    note = " · stationary data: this is GPS noise around one point" if max(width_m, height_m) < 50 else ""
+                    st.caption(f"{len(lat)} fixes · extent {width_m:.0f} m × {height_m:.0f} m{note}")
         with tabs[2]:
             st.caption(f"{result['samples']:,} samples in window (stride {result['stride']})")
             st.plotly_chart(signal_figure(imu.window(t0_epoch + win0, t0_epoch + win1, max_points=200_000),
