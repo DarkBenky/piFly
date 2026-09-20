@@ -134,6 +134,32 @@ def xy_figure(result, pinned):
     return fig
 
 
+def path_plot_figure(result, yaw_offset=0.0):
+    fig = go.Figure()
+    arrays = result["arrays"]
+    lat, lon = arrays.get("path__lat"), arrays.get("path__lon")
+    if lat is not None and len(lat):
+        import helpers
+        east, north = helpers.gps_to_enu(lat, lon, float(lat[0]), float(lon[0]))
+        fig.add_trace(go.Scatter(x=east, y=north, mode="lines+markers", name="gps path",
+                                 line=dict(color="#6cf", width=2), marker=dict(size=4)))
+        fig.add_trace(go.Scatter(x=[east[0]], y=[north[0]], mode="markers", name="start",
+                                 marker=dict(size=12, color="#5fd6a8")))
+    pos_east, pos_north = arrays.get("position__east"), arrays.get("position__north")
+    if pos_east is not None and pos_north is not None:
+        angle = np.radians(yaw_offset)
+        fig.add_trace(go.Scatter(x=pos_east * np.cos(angle) - pos_north * np.sin(angle),
+                                 y=pos_east * np.sin(angle) + pos_north * np.cos(angle),
+                                 mode="lines", name="imu position", line=dict(color="#e8a33d", width=1.4)))
+    if not len(fig.data):
+        return None
+    fig.update_layout(template="plotly_dark", height=520, margin=dict(l=10, r=10, t=30, b=10),
+                      paper_bgcolor="#1a1a1a", plot_bgcolor="#1a1a1a", hovermode="closest",
+                      xaxis=dict(title="east (m)", gridcolor="#2a2a2a", scaleanchor="y", scaleratio=1),
+                      yaxis=dict(title="north (m)", gridcolor="#2a2a2a"), legend=dict(orientation="h", y=1.06))
+    return fig
+
+
 def map_figure(result, yaw_offset=0.0, style="carto-darkmatter"):
     fig = go.Figure()
     arrays = result["arrays"]
@@ -387,8 +413,12 @@ with right:
             map_cols = st.columns([1, 1])
             yaw = map_cols[0].slider("imu path rotation (deg)", -180.0, 180.0, 0.0, step=5.0)
             style = map_cols[1].selectbox("basemap", ["carto-darkmatter", "open-street-map",
-                                                      "carto-positron", "white-bg (no tiles)"])
-            figure = map_figure(result, yaw, "white-bg" if style.startswith("white") else style)
+                                                      "carto-positron", "white-bg (no tiles)",
+                                                      "plain plot — no tiles, no WebGL"])
+            if style.startswith("plain"):
+                figure = path_plot_figure(result, yaw)
+            else:
+                figure = map_figure(result, yaw, "white-bg" if style.startswith("white") else style)
             if figure is None:
                 if coverage and not gps_rows:
                     st.info(f"no GPS fixes in this window — this session has {coverage['count']} fixes from "
@@ -399,6 +429,9 @@ with right:
                     st.info("your result has no `path`/`position` — return one to draw it here")
             else:
                 st.plotly_chart(figure, width="stretch")
+                if style.startswith("plain"):
+                    st.caption("tile-free view — if the map stays empty in your browser, WebGL is disabled "
+                               "or the tile requests are blocked")
                 lat = result["arrays"].get("path__lat")
                 lon = result["arrays"].get("path__lon")
                 if lat is not None and len(lat) > 1:
