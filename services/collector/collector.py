@@ -95,7 +95,7 @@ class Collector:
         self.gps_series = BucketSeries(("lat", "lon", "alt_m", "sats"), bucket_s=5.0, max_buckets=240)
         self.bme_series = BucketSeries(("bme_temp_c", "bme_pressure_hpa", "bme_humidity_pct"),
                                        bucket_s=10.0, max_buckets=180)
-        self.last = {"gps": None, "bme": None, "imu": None}
+        self.last = {"gps": None, "bme": None, "imu": None, "gps_live": None}
         self.marks = []
         self.started = time.time()
         self.stopped = None
@@ -248,20 +248,28 @@ class Collector:
                     "BME --",
                     "CPU --    IMU {:4.0f}Hz".format(self.rates["imu"].rate()),
                 ]
-            sats = gps.get("sats") or 0
+            sats = gps.get("sats")
+            if sats is None:
+                sats = (self.last.get("gps_live") or {}).get("sats") or 0
             if gps.get("lat") is not None:
-                rows.append("GPS {:2d}sat alt{:4.0f}m".format(sats, gps.get("alt_m") or 0.0))
-                rows.append("{} {}".format(_coord(gps["lat"], "N", "S"),
-                                           _coord(gps["lon"], "E", "W")))
+                rows.append("LAT {} {:2d}sat".format(_coord(gps["lat"], "N", "S"), sats))
+                rows.append("LON {}  ALT {:4.0f}m".format(
+                    _coord(gps["lon"], "E", "W"), gps.get("alt_m") or 0.0))
             else:
                 rows.append("GPS no fix {:2d}sat".format(sats))
-                rows.append("--")
-            for index, row in enumerate(rows):
-                disp.text(row, 1, 15 + index * 11, size=9, font=self.mono)
+                rows.append("LAT --  LON --  ALT --")
             if imu is not None:
-                bubble = int(disp.width / 2 + max(-1.0, min(1.0, imu.ax / 9.81)) * 26)
-                disp.hline(disp.width // 2 - 30, disp.width // 2 + 30, 61)
-                disp.fill_rect(bubble - 2, 58, bubble + 2, 63)
+                if int(now / 3) % 2:
+                    rows.append("GYR {:5.2f} {:5.2f} {:5.2f}".format(imu.gx, imu.gy, imu.gz))
+                else:
+                    rows.append("ACC {:5.2f} {:5.2f} {:5.2f}".format(imu.ax, imu.ay, imu.az))
+            else:
+                rows.append("IMU --")
+            top = 14
+            height = disp.text_size(rows[0], size=9, font=self.mono)[1]
+            pitch = max(height, (disp.height - 1 - top - height) // max(1, len(rows) - 1))
+            for index, row in enumerate(rows):
+                disp.text(row, 1, top + index * pitch, size=9, font=self.mono)
             disp.show()
             self.display_errors = 0
         except Exception:
@@ -349,6 +357,8 @@ class Collector:
                 self.errors["gps"].inc()
                 time.sleep(1.0)
                 continue
+            if reading:
+                self.last["gps_live"] = reading
             if reading and reading.get("lat") is not None:
                 record = {"t": time.time(), "mono_ns": time.monotonic_ns()}
                 record.update(reading)

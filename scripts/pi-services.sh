@@ -7,11 +7,11 @@ PY="/usr/bin/python"
 
 TEMPERATURE_SESSION="temperature-service"
 TEMPERATURE_PATTERN="services/temperature/client.py"
-TEMPERATURE_CMD="exec $PY Desktop/piFly/services/temperature/client.py"
+TEMPERATURE_CMD="exec $PY Desktop/piFly/services/temperature/client.py --no-log"
 
 COLLECTOR_SESSION="collector-service"
 COLLECTOR_PATTERN="services/collector/collector.py"
-COLLECTOR_CMD="exec $PY Desktop/piFly/services/collector/collector.py --static"
+COLLECTOR_CMD="exec $PY Desktop/piFly/services/collector/collector.py --static --no-log --display"
 
 session_exists() {
   tmux has-session -t "$1" 2>/dev/null
