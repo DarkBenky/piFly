@@ -7,7 +7,7 @@ PY="/usr/bin/python"
 
 TEMPERATURE_SESSION="temperature-service"
 TEMPERATURE_PATTERN="services/temperature/client.py"
-TEMPERATURE_CMD="exec $PY Desktop/piFly/services/temperature/client.py --no-log"
+TEMPERATURE_CMD="exec $PY Desktop/piFly/services/temperature/client.py"
 
 COLLECTOR_SESSION="collector-service"
 COLLECTOR_PATTERN="services/collector/collector.py"
