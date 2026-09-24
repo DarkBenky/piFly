@@ -18,7 +18,15 @@ session_exists() {
 }
 
 process_pid() {
-  pgrep -f "$1" 2>/dev/null | head -1 || true
+  local p
+  for p in $(pgrep -f "$1" 2>/dev/null); do
+    # the tmux server keeps the command of the session that started it in its
+    # argv, so pgrep -f matches it as well - only accept real python processes
+    case "$(cat "/proc/$p/comm" 2>/dev/null)" in
+      python*) echo "$p"; return 0 ;;
+    esac
+  done
+  return 0
 }
 
 start_one() {
