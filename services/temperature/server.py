@@ -229,6 +229,10 @@ def _fetch_weather():
 
 
 def _tight_range(values, pad=0.15):
+    """Range slightly padded around the data, or None (autorange) if empty."""
+    values = [v for v in values if v is not None]
+    if not values:
+        return None
     lo, hi = min(values), max(values)
     if lo == hi:
         return [lo - 1, hi + 1]
@@ -363,6 +367,16 @@ def _make_figures(data, compare_yesterday=None, compare_week=None, weather=None,
         fig_pres.add_trace(_make_scatter(wt, wv, "#ffcc88", width=1.0, dash="dot"))
         all_pres += wv
     fig_pres.update_layout(yaxis=dict(title="hPa", gridcolor="#2a2a2a", zeroline=False, range=_tight_range(all_pres)))
+
+    if not data:
+        for fig in (fig_bme, fig_cpu, fig_hum, fig_pres):
+            if not any(len(trace.x or ()) for trace in fig.data):
+                fig.add_annotation(
+                    text="No data for this range",
+                    xref="paper", yref="paper", x=0.5, y=0.5,
+                    showarrow=False,
+                    font=dict(color="#777777", size=13),
+                )
 
     return fig_bme, fig_cpu, fig_hum, fig_pres
 
