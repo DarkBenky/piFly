@@ -7,7 +7,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 import requests
 
-from modules.temperature import open_bme280
+from modules.temperature import SensorUnavailable, open_bme280
 
 SERVER_URL = "http://91.98.145.193:5000/api/ingest"
 DEFAULT_SAMPLES = 4
@@ -40,8 +40,20 @@ def main(argv=None):
     while True:
         records = []
         for _ in range(args.samples):
-            records.append(sensor.get_record())
+            try:
+                records.append(sensor.get_record())
+            except SensorUnavailable as exc:
+                print(f"BME280 read failed ({exc}); reopening...")
+                time.sleep(10)
+                sensor = open_bme280()
+                if sensor is None:
+                    break
             time.sleep(args.period / args.samples)
+
+        if not records:
+            print("no BME280 samples this cycle; retrying")
+            time.sleep(10)
+            continue
 
         rec = {
             "timestamp": records[0]["timestamp"],

@@ -1,4 +1,5 @@
 import os
+import struct
 import time
 
 import board
@@ -62,9 +63,9 @@ def _use_single_ioctl_reads(device, bus_num: int, address: int):
     the OLED on i2c-1, the other service process - can slip between the two
     and the read then returns data from the wrong register, which the
     compensation maths turns into huge bogus values (e.g. -140 C / 500 hPa).
-    smbus2's read_i2c_block_data is a single ioctl that the kernel executes
-    atomically, so the pair cannot be split (verified 2026-10-15: two
-    hammering processes produced 0 bad reads in 40k+ versus ~2700 before).
+    A combined ioctl shrinks that window a lot, but it is not a guarantee -
+    every read in this module is double-read and checked on top of it (see
+    BME280._read_raw_data).
     """
     try:
         from smbus2 import SMBus
@@ -73,10 +74,17 @@ def _use_single_ioctl_reads(device, bus_num: int, address: int):
             lambda register, length: bytes(
                 smbus.read_i2c_block_data(address, register, length))
         )
-        device._read_coefficients()    # re-read the calibration atomically
     except Exception:                  # noqa: BLE001 - fall back to driver reads
-        return device
+        pass
     return device
+
+
+def _is_not_ready(block: bytes) -> bool:
+    """True when the results block holds the power-on 'not ready' markers."""
+    t_raw = (block[3] << 16 | block[4] << 8 | block[5]) >> 4
+    p_raw = (block[0] << 16 | block[1] << 8 | block[2]) >> 4
+    h_raw = block[6] << 8 | block[7]
+    return t_raw == 0x80000 or p_raw == 0x80000 or h_raw == 0x8000
 
 
 def cpu_temp() -> float:
@@ -91,8 +99,10 @@ class BME280:
     """BME280 temperature / pressure / humidity sensor.
 
     Probes I2C bus 5, bus 0 (HAT-ID pins 27/28), then bus 1 (addresses 0x77 and
-    0x76), then finally the legacy SPI wiring on GPIO5.  Reads are retried, and
-    the device is re-detected once in case it was power-cycled underneath us.
+    0x76), then finally the legacy SPI wiring on GPIO5.  The sensor stays in
+    continuous mode; every register read is done twice and compared, values
+    that are impossible for a real measurement are rejected, and the device
+    is re-detected once in case it was power-cycled underneath us.
     """
 
     def __init__(self, retries: int = 3, retry_delay: float = 0.25,
@@ -102,6 +112,7 @@ class BME280:
         self._read_retries = read_retries
         self.bme280 = None
         self.backend = None
+        self._calib = None
         self._last_good = None
         self._connect(retries, retry_delay)
 
@@ -146,7 +157,16 @@ class BME280:
                     continue
                 self.bme280 = device
                 self.backend = label
-                self._configure()
+                try:
+                    self._configure()
+                    self._load_calibration()
+                    self._check_live()
+                except Exception as exc:   # noqa: BLE001 - bus errors etc.
+                    errors.append(f"{label}: {type(exc).__name__}: {exc}")
+                    self.bme280 = None
+                    self._calib = None
+                    continue
+                self._last_good = None     # fresh baseline for this session
                 return
             if attempt < retries:
                 time.sleep(retry_delay)
@@ -162,35 +182,172 @@ class BME280:
         # Continuous (normal) mode with a 500 ms standby: every read returns
         # the result of the last completed conversion, so a read can never
         # land during a conversion.  Forced mode re-triggers a conversion on
-        # every property read, and reads that run while one is in progress
-        # (status-poll race, or another reader re-triggering under our feet)
-        # return torn registers - the one-sample -140 C / 500 hPa spikes.
-        self.bme280._write_register_byte(0xF5, 0x80)   # t_sb = 500 ms
-        self.bme280.mode = adafruit_bme280.MODE_NORMAL
+        # every property read and used to return torn registers - the
+        # one-sample -140 C / 500 hPa spikes.
+        # The writes are read back because a write issued while the sensor is
+        # busy (NVM copy right after a reset) can be ignored - that is how a
+        # sensor ends up stuck on its reset markers.
+        for _ in range(10):
+            try:
+                self.bme280._write_register_byte(0xF5, 0x80)   # t_sb = 500 ms
+                self.bme280.mode = adafruit_bme280.MODE_NORMAL
+                if self.bme280._read_register(0xF4, 1)[0] == self.bme280._ctrl_meas:
+                    return
+            except (OSError, RuntimeError, ValueError, ArithmeticError):
+                pass
+            time.sleep(0.01)
+        raise SensorUnavailable("BME280 did not enter normal mode")
 
     @property
     def available(self) -> bool:
         return self.bme280 is not None
 
+    # -- calibration & raw reads --------------------------------------------
+    def _load_calibration(self) -> None:
+        """Read the calibration blocks - double-read, sanity-checked.
+
+        This is a one-shot read at connect time, and a torn read here would
+        silently poison every later value (seen 2026-10-15: a process that
+        computed -31 C from perfectly correct raw registers).  Reading each
+        block twice and requiring a match makes that practically impossible.
+        """
+        for _ in range(6):
+            try:
+                first = self._read_calibration_bytes()
+                second = self._read_calibration_bytes()
+            except (OSError, RuntimeError, ValueError, struct.error):
+                time.sleep(0.05)
+                continue
+            if first == second:
+                calib = self._parse_calibration(*first)
+                if calib is not None:
+                    self._calib = calib
+                    return
+            time.sleep(0.05)
+        raise SensorUnavailable("BME280 calibration reads kept changing")
+
+    def _read_calibration_bytes(self):
+        return (bytes(self.bme280._read_register(0x88, 24)),
+                bytes(self.bme280._read_register(0xA1, 1)),
+                bytes(self.bme280._read_register(0xE1, 7)))
+
+    @staticmethod
+    def _parse_calibration(coeff: bytes, h1: bytes, he: bytes):
+        if len(coeff) != 24 or len(h1) != 1 or len(he) != 7:
+            return None
+        raw = list(struct.unpack("<HhhHhhhhhhhh", coeff))
+        t_calib = [float(v) for v in raw[:3]]
+        p_calib = [float(v) for v in raw[3:]]
+        hc = list(struct.unpack("<hBbBbb", he))
+        h_calib = [float(h1[0]), float(hc[0]), float(hc[1]),
+                   float((hc[2] << 4) | (hc[3] & 0x0F)),
+                   float((hc[4] << 4) | (hc[3] >> 4)), float(hc[5])]
+        # wide plausibility bounds: a corrupted block is usually wild
+        if not 10000.0 <= t_calib[0] <= 40000.0:
+            return None
+        if not 10000.0 <= p_calib[0] <= 50000.0:
+            return None
+        return (t_calib, p_calib, h_calib)
+
+    def _check_live(self) -> None:
+        """Make sure real measurements are flowing, not reset markers."""
+        for _ in range(5):
+            if self._read_raw_data() is not None:
+                return
+            time.sleep(0.15)
+        raise SensorUnavailable("BME280 is not producing measurements")
+
+    def _read_raw_data(self):
+        """The 8-byte results block, read twice and compared.
+
+        A single read can come back torn - another process, or the IMU/OLED
+        on the same bus, slipping between the register write and the read,
+        or the sensor updating the registers mid-read.  Two identical reads
+        rule that out, and reset markers ('not ready') are rejected.
+        """
+        for _ in range(4):
+            try:
+                first = bytes(self.bme280._read_register(0xF7, 8))
+                second = bytes(self.bme280._read_register(0xF7, 8))
+            except (OSError, RuntimeError, ValueError):
+                time.sleep(0.05)
+                continue
+            if first == second and not _is_not_ready(first):
+                return first
+            time.sleep(0.05)
+        return None
+
+    def _compensate(self, block: bytes):
+        """Convert one results block to (temp C, pressure hPa, humidity %).
+
+        Ported from adafruit_bme280.basic (including the integer truncation
+        of t_fine) so values match what the driver produced historically.
+        """
+        t_calib, p_calib, h_calib = self._calib
+        raw_t = (block[3] << 16 | block[4] << 8 | block[5]) >> 4
+        raw_p = (block[0] << 16 | block[1] << 8 | block[2]) >> 4
+        raw_h = block[6] << 8 | block[7]
+
+        var1 = (raw_t / 16384.0 - t_calib[0] / 1024.0) * t_calib[1]
+        var2 = ((raw_t / 131072.0 - t_calib[0] / 8192.0) ** 2) * t_calib[2]
+        t_fine = int(var1 + var2)
+        temp = t_fine / 5120.0
+
+        var1 = t_fine / 2.0 - 64000.0
+        var2 = var1 * var1 * p_calib[5] / 32768.0
+        var2 += var1 * p_calib[4] * 2.0
+        var2 = var2 / 4.0 + p_calib[3] * 65536.0
+        var3 = p_calib[2] * var1 * var1 / 524288.0
+        var1 = (var3 + p_calib[1] * var1) / 524288.0
+        var1 = (1.0 + var1 / 32768.0) * p_calib[0]
+        if not var1:
+            raise ArithmeticError("invalid BME280 calibration")
+        press = 1048576.0 - raw_p
+        press = ((press - var2 / 4096.0) * 6250.0) / var1
+        var1 = p_calib[8] * press * press / 2147483648.0
+        var2 = press * p_calib[7] / 32768.0
+        press = (press + (var1 + var2 + p_calib[6]) / 16.0) / 100.0
+
+        var1 = float(t_fine) - 76800.0
+        var2 = h_calib[3] * 64.0 + (h_calib[4] / 16384.0) * var1
+        var3 = raw_h - var2
+        var4 = h_calib[1] / 65536.0
+        var5 = 1.0 + (h_calib[2] / 67108864.0) * var1
+        var6 = 1.0 + (h_calib[5] / 67108864.0) * var1 * var5
+        var6 = var3 * var4 * (var5 * var6)
+        humid = var6 * (1.0 - h_calib[0] * var6 / 524288.0)
+        if humid > 100.0:
+            humid = 100.0
+        elif humid < 0.0:
+            humid = 0.0
+        return temp, press, humid
+
     # -- reading ------------------------------------------------------------
     def _try_read(self):
         """Single read attempt; returns None when the bus errors out."""
         try:
-            return {
-                "timestamp": time.time(),
-                "bme_temp_c": self.bme280.temperature,
-                "bme_pressure_hpa": self.bme280.pressure,
-                "bme_humidity_pct": self.bme280.relative_humidity,
-                "cpu_temp_c": cpu_temp(),
-            }
+            if self.bme280 is None or self._calib is None:
+                return None
+            block = self._read_raw_data()
+            if block is None:
+                return None
+            temp, press, humid = self._compensate(block)
+            cpu = cpu_temp()
         except (OSError, RuntimeError, ValueError, ArithmeticError):
             return None
+        return {
+            "timestamp": time.time(),
+            "bme_temp_c": temp,
+            "bme_pressure_hpa": press,
+            "bme_humidity_pct": humid,
+            "cpu_temp_c": cpu,
+        }
 
     # plausible value ranges and the largest change physically possible
     # between two consecutive reads (used to reject torn-register reads)
     RANGES = {
         "bme_temp_c": (-45.0, 90.0),
-        "bme_pressure_hpa": (300.0, 1100.0),
+        "bme_pressure_hpa": (850.0, 1090.0),   # ground-level air pressure
         "bme_humidity_pct": (0.0, 100.0),
     }
     MAX_STEP = {
