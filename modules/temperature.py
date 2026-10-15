@@ -54,6 +54,31 @@ class _SMBusI2C:
             buffer[start + offset] = value
 
 
+def _use_single_ioctl_reads(device, bus_num: int, address: int):
+    """Re-route the driver's register reads through one combined I2C ioctl.
+
+    The stock driver reads a register in two separate transfers (write the
+    register pointer, then read).  Anything else using the bus - the IMU or
+    the OLED on i2c-1, the other service process - can slip between the two
+    and the read then returns data from the wrong register, which the
+    compensation maths turns into huge bogus values (e.g. -140 C / 500 hPa).
+    smbus2's read_i2c_block_data is a single ioctl that the kernel executes
+    atomically, so the pair cannot be split (verified 2026-10-15: two
+    hammering processes produced 0 bad reads in 40k+ versus ~2700 before).
+    """
+    try:
+        from smbus2 import SMBus
+        smbus = SMBus(bus_num)
+        device._bus_implementation.read_register = (
+            lambda register, length: bytes(
+                smbus.read_i2c_block_data(address, register, length))
+        )
+        device._read_coefficients()    # re-read the calibration atomically
+    except Exception:                  # noqa: BLE001 - fall back to driver reads
+        return device
+    return device
+
+
 def cpu_temp() -> float:
     """Return Raspberry Pi CPU temperature in °C."""
     with open("/sys/class/thermal/thermal_zone0/temp") as f:
@@ -77,6 +102,7 @@ class BME280:
         self._read_retries = read_retries
         self.bme280 = None
         self.backend = None
+        self._last_good = None
         self._connect(retries, retry_delay)
 
     # -- connection ---------------------------------------------------------
@@ -90,9 +116,11 @@ class BME280:
         last_error = None
         for address in I2C_ADDRESSES:
             try:
-                return adafruit_bme280.Adafruit_BME280_I2C(bus, address=address)
+                device = adafruit_bme280.Adafruit_BME280_I2C(bus, address=address)
             except Exception as exc:       # noqa: BLE001 - probing, keep trying
                 last_error = exc
+                continue
+            return _use_single_ioctl_reads(device, bus_num, address)
         raise last_error
 
     def _open_spi(self):
@@ -131,7 +159,14 @@ class BME280:
         self.bme280.overscan_temperature = adafruit_bme280.OVERSCAN_X1
         self.bme280.overscan_pressure = adafruit_bme280.OVERSCAN_X1
         self.bme280.overscan_humidity = adafruit_bme280.OVERSCAN_X1
-        self.bme280.mode = adafruit_bme280.MODE_FORCE
+        # Continuous (normal) mode with a 500 ms standby: every read returns
+        # the result of the last completed conversion, so a read can never
+        # land during a conversion.  Forced mode re-triggers a conversion on
+        # every property read, and reads that run while one is in progress
+        # (status-poll race, or another reader re-triggering under our feet)
+        # return torn registers - the one-sample -140 C / 500 hPa spikes.
+        self.bme280._write_register_byte(0xF5, 0x80)   # t_sb = 500 ms
+        self.bme280.mode = adafruit_bme280.MODE_NORMAL
 
     @property
     def available(self) -> bool:
@@ -148,13 +183,43 @@ class BME280:
                 "bme_humidity_pct": self.bme280.relative_humidity,
                 "cpu_temp_c": cpu_temp(),
             }
-        except (OSError, RuntimeError, ValueError):
+        except (OSError, RuntimeError, ValueError, ArithmeticError):
             return None
+
+    # plausible value ranges and the largest change physically possible
+    # between two consecutive reads (used to reject torn-register reads)
+    RANGES = {
+        "bme_temp_c": (-45.0, 90.0),
+        "bme_pressure_hpa": (300.0, 1100.0),
+        "bme_humidity_pct": (0.0, 100.0),
+    }
+    MAX_STEP = {
+        "bme_temp_c": 4.0,
+        "bme_pressure_hpa": 4.0,
+        "bme_humidity_pct": 12.0,
+    }
+
+    def _plausible(self, record: dict) -> bool:
+        """Reject impossible values before they pollute the data.
+
+        A bad read shows up as an out-of-range value (e.g. -140 C,
+        500 hPa) or an impossible jump versus the previous accepted read.
+        """
+        for key, (low, high) in self.RANGES.items():
+            if not low <= record[key] <= high:
+                return False
+        last = self._last_good
+        if last is not None and record["timestamp"] - last["timestamp"] < 300.0:
+            for key, limit in self.MAX_STEP.items():
+                if abs(record[key] - last[key]) > limit:
+                    return False
+        return True
 
     def get_record(self) -> dict:
         for attempt in range(1, self._read_retries + 1):
             record = self._try_read()
-            if record is not None:
+            if record is not None and self._plausible(record):
+                self._last_good = record
                 return record
             if attempt < self._read_retries:
                 time.sleep(self._retry_delay)
@@ -166,7 +231,8 @@ class BME280:
                 f"BME280 unreadable and no longer detected: {exc}"
             ) from exc
         record = self._try_read()
-        if record is not None:
+        if record is not None and self._plausible(record):
+            self._last_good = record
             return record
         raise SensorUnavailable("BME280 re-detected but reads still fail")
 
